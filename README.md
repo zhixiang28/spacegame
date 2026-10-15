@@ -16,7 +16,7 @@ Open `index.html` on the TV (serve it over https, e.g. GitHub Pages) and pick a 
 - Phone settings (gear icon): auto-gas, invert steering, touch wheel fallback, re-centre.
 
 ## Filament Slice (hand tracking)
-Swipe both hands (or the mouse) fast through flying filament spools (+10) and circuit boards (+15). Keep a combo going for up to x5.
+Up to 3 people can play side by side (each with their own score and lives). Swipe both hands (or the mouse) fast through flying filament spools (+10) and circuit boards (+15). Keep a combo going for up to x5.
 Avoid the red-hot nozzles: each one you slice costs a power cell (3 lives). A shift lasts 75 s.
 
 Files: `index.html` (TV: menu, Maker Run, Circuit Racers), `controller.html` (phone).
@@ -24,3 +24,7 @@ Files: `index.html` (TV: menu, Maker Run, Circuit Racers), `controller.html` (ph
 ## Full screen and install
 - The TV page goes full screen when you press **Start the station** (press **F** to toggle).
 - In Chrome or Edge, use **Install as an app** on the start screen (or the install icon in the address bar) to get a desktop icon that opens full screen with no browser bars. Needs https.
+
+## Wi-Fi QR in the racers lobby
+Press **W** in the Circuit Racers lobby to enter the Wi-Fi name and password. A second QR code then appears so phones can join your network first.
+It is saved only in that browser (localStorage), not in the repo, so the password is never published.

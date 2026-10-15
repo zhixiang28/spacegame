@@ -141,7 +141,7 @@ const sfx={
    ===================================================================== */
 let landmarker=null,camOK=false,status='Starting…';
 const P={ok:false,lastSeen:-99,sx:0,sy:0,hx:0,hy:0,shW:.15,torso:.25,hasHips:false,lean:0,
-         cur:{x:.5,y:.5},curOk:false,bothUp:false,lm:null};
+         cur:{x:.5,y:.5},curOk:false,bothUp:false,lm:null,all:[]};
 const F={sx:new OneEuro(),sy:new OneEuro(),sw:new OneEuro(),hx:new OneEuro(),hy:new OneEuro(),
          cx:new OneEuro(1.2,4),cy:new OneEuro(1.2,4)};
 const camMode=()=>camOK&&!!landmarker;
@@ -171,7 +171,7 @@ function detect(now){
   processPose(res.landmarks,now/1000);
 }
 function processPose(lms,t){
-  P.bothUp=false;
+  P.bothUp=false;P.all=lms||[];
   if(!lms||!lms.length){P.ok=false;P.lm=null;return;}
   const lm=lms[0];P.lm=lm;
   const asp=video.videoWidth/video.videoHeight;
@@ -238,7 +238,8 @@ let base=null;
 const cal={samples:[],msg:'',prog:0,ok:false};
 let cdLast=-1;
 
-function go(s){state=s;stateT=0;lock=.6;hov={id:null,t:0};cdLast=-1;}
+function go(s){state=s;stateT=0;lock=.6;hov={id:null,t:0};cdLast=-1;
+  if(!s.startsWith('fs'))fsSetPoses(1);}
 function addBtn(id,x,y,w,h,on=true,noHand=false){buttons.push({id,x,y,w,h,on,noHand});}
 const inRect=(p,x,y,w,h)=>p.on&&p.x>=x&&p.x<=x+w&&p.y>=y&&p.y<=y+h;
 function pointer(t){
@@ -743,7 +744,7 @@ const RCC={
 RCC.camD=1/Math.tan(RCC.fov/2*Math.PI/180);
 RCC.playerZ=RCC.camH*RCC.camD*1.3;
 RCC.accel=RCC.maxSpeed/4.5; RCC.brakeA=-RCC.maxSpeed*1.1; RCC.decel=-RCC.maxSpeed/6;
-RCC.offDecel=-RCC.maxSpeed/2.2; RCC.offLimit=RCC.maxSpeed/4; RCC.centrif=.35;
+RCC.offDecel=-RCC.maxSpeed/2.2; RCC.offLimit=RCC.maxSpeed/4; RCC.centrif=.13;
 const ORD=['1st','2nd','3rd','4th','5th','6th'];
 const fmtT=s=>{const m=Math.floor(s/60);return `${m}:${(s-m*60).toFixed(2).padStart(5,'0')}`;};
 const rc={segs:[],len:0,N:0,cars:[],t:0,firstFin:null,cdLast:-1,bcast:0,best:null};
@@ -754,17 +755,36 @@ const rcKeys={l:0,r:0,g:0,b:0,n:0};
 const NET={peer:null,id:null,ready:false,err:'',url:'',slots:[null,null,null,null],tries:0,lastTry:0};
 const SIGNAL=(()=>{const s=new URLSearchParams(location.search).get('signal');if(!s)return null;
   const[h,p,sec]=s.split(':');return{host:h,port:+p||9000,secure:sec==='1'||sec==='s',path:'/'};})();
-let rcQR=null;
-function rcMakeQR(url){
+let rcQR=null,rcWifiQR=null,rcWifi=null;
+/* Optional Wi-Fi QR so phones can join the venue network first. Saved only in this browser (press W in the lobby),
+   never in the repo, so the password is not published. */
+function rcLoadWifi(){
+  try{rcWifi=JSON.parse(localStorage.getItem('sl_wifi')||'null');}catch(e){rcWifi=null;}
+  rcWifiQR=null;if(!rcWifi||!rcWifi.ssid)return;
+  const esc=s=>String(s).replace(/([\\;,:"])/g,'\\$1');
+  rcWifiQR=rcQRCanvas(`WIFI:T:${rcWifi.pass?'WPA':'nopass'};S:${esc(rcWifi.ssid)};${rcWifi.pass?'P:'+esc(rcWifi.pass)+';':''};`);
+}
+function rcSetupWifi(){
+  const cur=rcWifi||{ssid:'SL-BYOD',pass:''};
+  const ssid=prompt('Wi-Fi name for the QR code (leave empty to remove it):',cur.ssid);
+  if(ssid===null)return;
+  if(!ssid.trim()){try{localStorage.removeItem('sl_wifi');}catch(e){}rcLoadWifi();return;}
+  const pass=prompt('Wi-Fi password (empty for an open network). Saved only in this browser:','');
+  if(pass===null)return;
+  try{localStorage.setItem('sl_wifi',JSON.stringify({ssid:ssid.trim(),pass}));}catch(e){}
+  rcLoadWifi();
+}
+function rcQRCanvas(text){
   try{
-    const q=qrcode(0,'M');q.addData(url);q.make();
+    const q=qrcode(0,'M');q.addData(text);q.make();
     const n=q.getModuleCount(),s=10,pad=3,c=document.createElement('canvas');
     c.width=c.height=(n+pad*2)*s;const g=c.getContext('2d');
     g.fillStyle='#fff';g.fillRect(0,0,c.width,c.height);g.fillStyle='#050b16';
     for(let r=0;r<n;r++)for(let k=0;k<n;k++)if(q.isDark(r,k))g.fillRect((k+pad)*s,(r+pad)*s,s,s);
-    rcQR=c;
-  }catch(e){rcQR=null;NET.err='Could not draw the QR code';}
+    return c;
+  }catch(e){return null;}
 }
+function rcMakeQR(url){rcQR=rcQRCanvas(url);if(!rcQR)NET.err='Could not draw the QR code';}
 function netInit(){
   if(NET.peer)return;
   if(typeof Peer==='undefined'){NET.err='Network library not loaded. Check the internet connection.';return;}
@@ -822,6 +842,7 @@ function netData(conn,d){
   s.last=performance.now();
   if(d.t==='in'){s.in.s=clamp(+d.s||0,-1,1);s.in.g=d.g?1:0;s.in.b=d.b?1:0;s.in.n=d.n?1:0;}
   else if(d.t==='start'&&s.i===netFirst()&&(state==='lobby'||state==='rresult'))rcStartRace();
+  else if(d.t==='menu'&&s.i===netFirst()&&(state==='lobby'||state==='rresult'))go('menu');
 }
 const netFirst=()=>{const s=NET.slots.find(x=>x&&x.conn);return s?s.i:-1;};
 const netCount=()=>NET.slots.filter(x=>x&&x.conn).length;
@@ -848,12 +869,12 @@ function netTick(dt){
 
 /* ---------------- track ---------------- */
 function rcBuildTrack(){
-  const SL=RCC.segLen,K=2,segs=rc.segs=[];let lastY=0;
+  const SL=RCC.segLen,K=1,segs=rc.segs=[];let lastY=0;
   const ease=(a,b,p)=>a+(b-a)*(-Math.cos(p*Math.PI)/2+.5);
   const addSeg=(curve,y)=>{segs.push({i:segs.length,y0:lastY,y1:y,curve,sprites:[],cars:[],clip:0,vis:false,
     a:{sx:0,sy:0,sc:0,sw:0,z:0},b:{sx:0,sy:0,sc:0,sw:0,z:0}});lastY=y;};
   const road=(en,ho,le,curve,dy)=>{
-    en*=K;ho*=K;le*=K;const sy=lastY,ey=sy+dy*SL,tot=en+ho+le;let n;
+    en*=K;ho*=K;le*=K;const sy=lastY,ey=sy+dy*SL*.6,tot=en+ho+le;let n;
     for(n=0;n<en;n++)addSeg(curve*(n/en)*(n/en),ease(sy,ey,n/tot));
     for(n=0;n<ho;n++)addSeg(curve,ease(sy,ey,(en+n)/tot));
     for(n=0;n<le;n++){const p=n/le;addSeg(curve*(1-p)*(1-p),ease(sy,ey,(en+ho+n)/tot));}
@@ -870,7 +891,7 @@ function rcBuildTrack(){
   road(15,25,15,6,0);
   road(15,25,15,-6,0);
   road(20,40,20,2,0);
-  road(25,35,25,0,-lastY/SL);
+  road(25,35,25,0,-lastY/SL/.6);
   segs[segs.length-1].y1=0;
   rc.N=segs.length;rc.len=rc.N*SL;
   // pylons along both sides
@@ -969,7 +990,7 @@ function rcPhys(c,dt){
   if(c.speed>cap)c.speed=c.boosting?cap:Math.max(R.maxSpeed,c.speed-R.maxSpeed*.5*dt);
   c.speed=Math.max(0,c.speed);
   const sp=c.speed/R.maxSpeed,dx=dt*2*Math.min(1,sp+.1);
-  c.x+=dx*c.steer*.95-dx*sp*seg.curve*R.centrif;
+  c.x+=dx*c.steer*1.4-dx*sp*seg.curve*R.centrif;
   c.x=clamp(c.x,-1.25,1.25);
   c.pz=c.z;c.z+=c.speed*dt;
   c.crash=Math.max(0,c.crash-dt);c.hitFlash=Math.max(0,c.hitFlash-dt);
@@ -1019,7 +1040,7 @@ function rcLaps(c){
 function rcEnterLobby(){
   for(const s of NET.slots)if(s&&!s.conn)NET.slots[s.i]=null;
   for(const s of NET.slots)if(s)s.inRace=false;
-  rc.cars=[];netInit();go('lobby');
+  rc.cars=[];netInit();rcLoadWifi();go('lobby');
 }
 function rcEnd(){
   rcRank();
@@ -1286,8 +1307,14 @@ function rcDrawLobby(t){
   const relay=NET.ready?'Relay online':(NET.err||'Connecting to relay…');
   txt(relay+(NET.tries?`   ·   ${NET.tries} phone attempt${NET.tries>1?'s':''}`:''),qx+qs/2,qy+qs+(local?215:132),20,NET.ready?C.green:C.orange,'center',600);
   // how to
-  const steps=['Scan the QR code','Tap “Enable steering”','Hold the phone like a wheel'];
-  steps.forEach((s,i)=>{const y=290+i*70;ctx.fillStyle=C.orange;ctx.beginPath();ctx.arc(760,y-10,24,0,7);ctx.fill();txt(String(i+1),760,y-1,28,'#1a0d00','center',700);txt(s,806,y,32,C.text,'left',600);});
+  const steps=(rcWifiQR?['Join the Wi-Fi (small QR, right)']:[]).concat(['Scan the big QR code','Tap “Enable steering”','Hold the phone like a wheel']);
+  if(rcWifiQR){
+    const wx=W-300,wy=215,ws=230;
+    rr(wx-10,wy-10,ws+20,ws+20,18);ctx.fillStyle='#0f2342';ctx.fill();ctx.lineWidth=3;ctx.strokeStyle=C.orange;ctx.stroke();
+    ctx.imageSmoothingEnabled=false;ctx.drawImage(rcWifiQR,wx,wy,ws,ws);ctx.imageSmoothingEnabled=true;
+    txt('Wi-Fi: '+rcWifi.ssid,wx+ws/2,wy+ws+42,26,C.orange,'center',700);
+  }
+  steps.forEach((s,i)=>{const y=275+i*58;ctx.fillStyle=C.orange;ctx.beginPath();ctx.arc(760,y-10,22,0,7);ctx.fill();txt(String(i+1),760,y-1,26,'#1a0d00','center',700);txt(s,806,y,30,C.text,'left',600);});
   // seats
   for(let i=0;i<4;i++){
     const s=NET.slots[i],x=730+(i&1)*570,y=520+(i>>1)*140,w=540,h=122,on=s&&s.conn;
@@ -1308,6 +1335,7 @@ function rcDrawLobby(t){
   else rcBtn('rc:start','Start race (keyboard / mouse click)',730,810,760,130,true,true,true);
   rcBtn('menu','Back to menu',1530,810,320,130,true,false);
   txt('The race starts from the phone, so waving at the TV will not start it.  Empty seats get CPU racers.',730,980,24,C.dim,'left',500);
+  txt(rcWifiQR?'Press W to change or remove the Wi-Fi QR':'Press W to add a Wi-Fi QR so phones can join your network',730,1056,20,C.dim,'left',500);
   if(rc.best)txt(`Fastest lap  ${fmtT(rc.best.t)}  (${rc.best.name})`,730,1020,26,C.yellow,'left',600);
   drawCam(W-310,36,260,146,false);
 }
@@ -1335,9 +1363,9 @@ function rcDrawResults(t){
     if(best!==null)txt('best lap '+fmtT(best),x+w-300,y+48,22,C.dim,'right',500);
     txt(c.finished?fmtT(c.finT):'DNF',x+w-30,y+52,36,c.finished?C.yellow:C.dim,'right',700);
   });
-  rcBtn('rc:again','Race again',CX-440,830,400,130,true,true,true);
-  rcBtn('rc:lobby','Change players',CX+40,830,400,130,true,false);
-  txt('Back to menu: hold both hands up, or press M',CX,1010,24,C.dim,'center',500);
+  rcBtn('rc:again','Race again',CX-640,830,380,130,true,true,true);
+  rcBtn('rc:lobby','Change players',CX-190,830,380,130,true,false);
+  rcBtn('menu','Back to menu',CX+260,830,380,130,true,false);
 }
 function rcDraw(t){
   if(state==='lobby')rcDrawLobby(t);
@@ -1351,6 +1379,7 @@ addEventListener('keydown',e=>{
   else if(k===' '||k==='shift')rcKeys.n=1;
   if(RC_STATES.includes(state)&&(k===' '||k.startsWith('arrow')))e.preventDefault();
   if(k==='enter'&&state==='lobby'&&!netCount())rcStartRace();
+  if(k==='w'&&state==='lobby'){rcSetupWifi();rcKeys.l=rcKeys.r=rcKeys.g=rcKeys.b=rcKeys.n=0;}
 });
 window.__racer={NET,rc,get state(){return state;}};   // handy for debugging in the console
 addEventListener('keyup',e=>{
@@ -1362,54 +1391,87 @@ addEventListener('keyup',e=>{
 
 /* =====================================================================
    FILAMENT SLICE: swipe both hands (or the mouse) through flying parts.
+   Up to 3 players side by side, each with their own score and lives.
    Slice filament spools and PCBs, avoid the red-hot nozzles.
    ===================================================================== */
 const FS_STATES=['fscount','fsplay','fsover'];
-const FS={grav:1500,minSpeed:850,hit:14,combo:1.3};
-const S={t:0,score:0,lives:3,combo:0,comboT:0,best:0,sliced:0,missed:0,objs:[],frags:[],pops:[],nextWave:.6,flash:0,shake:0,newBest:false,
-         blades:[{x:0,y:0,px:0,py:0,on:false,pon:false,trail:[],col:'#35e0ff'},{x:0,y:0,px:0,py:0,on:false,pon:false,trail:[],col:'#ff8a1f'},
-                 {x:0,y:0,px:0,py:0,on:false,pon:false,trail:[],col:'#35e0ff'}]};
-const fsF=[0,1].map(()=>({x:new OneEuro(2.5,15),y:new OneEuro(2.5,15)}));
+const FS={grav:1500,minSpeed:850,hit:14,max:3,joinUntil:10,cols:['#35e0ff','#ff8a1f','#4dff9a']};
+const S={t:0,objs:[],frags:[],pops:[],nextWave:.6,flash:0,shake:0,newBest:false,players:[],blades:[]};
+for(let i=0;i<FS.max;i++)for(let k=0;k<2;k++)S.blades.push({pl:i,k,x:0,y:0,px:0,py:0,on:false,pon:false,trail:[],speed:0});
+S.blades.push({pl:0,k:2,x:0,y:0,px:0,py:0,on:false,pon:false,trail:[],speed:0});            // mouse
+const fsBody=Array.from({length:FS.max},()=>({sx:new OneEuro(1.2,2),sy:new OneEuro(1.2,2),sw:new OneEuro(1.2,2),to:new OneEuro(1.2,2)}));
+const fsHandF=Array.from({length:FS.max},()=>[0,1].map(()=>({x:new OneEuro(2.5,15),y:new OneEuro(2.5,15)})));
 const fsBest=()=>{try{return JSON.parse(localStorage.getItem('sl_slice_best')||'[]');}catch(e){return[];}};
+let fsPoses=1;
+window.__fs=S;   // handy for debugging in the console
+function fsSetPoses(n){      // track several people only while Filament Slice is open
+  if(!landmarker||fsPoses===n)return;fsPoses=n;
+  try{const r=landmarker.setOptions({numPoses:n});if(r&&r.catch)r.catch(()=>{});}catch(e){}
+}
 function resetSlice(){
-  Object.assign(S,{t:0,score:0,lives:CFG.lives,combo:0,comboT:0,sliced:0,missed:0,objs:[],frags:[],pops:[],nextWave:.6,flash:0,shake:0,newBest:false});
+  Object.assign(S,{t:0,objs:[],frags:[],pops:[],nextWave:.6,flash:0,shake:0,newBest:false});
+  S.players=Array.from({length:FS.max},(_,i)=>({i,col:FS.cols[i],score:0,lives:CFG.lives,combo:0,comboT:0,sliced:0,missed:0,
+    active:i===0,out:false,lastSx:null,hands:[null,null]}));
   for(const b of S.blades){b.on=b.pon=false;b.trail.length=0;}
 }
-function startSlice(){resetSlice();go('fscount');}
+function startSlice(){resetSlice();fsSetPoses(FS.max);go('fscount');}
+const fsActive=()=>S.players.filter(p=>p.active);
 
 function fsWave(){
-  const n=1+Math.floor(Math.random()*(1+Math.min(3,S.t/20)));
+  const n=1+Math.floor(Math.random()*(1+Math.min(3,S.t/20)))+(fsActive().length>1?1:0);
   const nozP=.1+Math.min(.18,S.t/220);
   for(let i=0;i<n;i++){
     const r=Math.random(),k=r<nozP?'nozzle':(r<.6?'spool':'pcb'),x=rand(300,W-300);
     S.objs.push({k,x,y:H+90,vx:(W/2-x)*rand(.15,.5)+rand(-150,150),vy:-rand(1500,1850),r:k==='pcb'?80:74,rot:rand(0,6),vr:rand(-4,4),hit:false,seen:false});
   }
 }
-function fsHands(t){
-  const out=[];if(!tracked(t)||!P.lm)return out;
-  const lm=P.lm,asp=video.videoWidth/video.videoHeight;
-  [[19,15],[20,16]].forEach(([a,b],k)=>{
-    const i=(lm[a].visibility??1)>.4?a:((lm[b].visibility??1)>.4?b:-1);if(i<0)return;
-    const X=(1-lm[i].x)*asp,Y=lm[i].y;
-    const nx=.5+(X-P.sx)/(P.shW*5.2),ny=.5+(Y-P.sy)/(P.torso*2.8);
-    out[k]={x:clamp(fsF[k].x.f(nx,t),-.05,1.05)*W,y:clamp(fsF[k].y.f(ny,t),-.05,1.05)*H};
-  });
-  return out;
+/* find up to 3 people, give each a stable seat (left to right), turn their hands into screen points */
+function fsTrack(t){
+  const pl=S.players;for(const p of pl)p.hands=[null,null];
+  if(!camMode()||!P.all||!P.all.length)return;
+  const asp=video.videoWidth/video.videoHeight;
+  const info=[];
+  for(const lm of P.all){
+    const V=i=>lm[i].visibility??1,X=i=>(1-lm[i].x)*asp,Y=i=>lm[i].y;
+    if(V(11)<.5||V(12)<.5)continue;
+    const sx=(X(11)+X(12))/2,sy=(Y(11)+Y(12))/2,shW=Math.abs(X(11)-X(12));
+    const hips=V(23)>.4&&V(24)>.4,torso=hips?Math.max(.05,Math.hypot(sx-(X(23)+X(24))/2,sy-(Y(23)+Y(24))/2)):shW*1.25;
+    info.push({lm,V,X,Y,sx,sy,shW,torso});
+  }
+  info.sort((a,b)=>a.sx-b.sx);
+  const used=new Set(),seat=new Map();
+  const free=()=>pl.find(p=>!p.active&&!used.has(p.i));
+  for(const o of info.slice(0,FS.max)){          // match to the seat whose last position is closest
+    let best=null,bd=.5;
+    for(const p of pl)if(p.lastSx!==null&&!used.has(p.i)){const d=Math.abs(p.lastSx-o.sx);if(d<bd){bd=d;best=p;}}
+    if(!best&&(state==='fscount'||S.t<FS.joinUntil))best=free()||null;
+    if(best){used.add(best.i);seat.set(best,o);}
+  }
+  for(const [p,o] of seat){
+    p.active=true;p.lastSx=o.sx;
+    const B=fsBody[p.i],sx=B.sx.f(o.sx,t),sy=B.sy.f(o.sy,t),sw=B.sw.f(o.shW,t),to=B.to.f(o.torso,t);
+    [[19,15],[20,16]].forEach(([a,b],k)=>{
+      const i=o.V(a)>.4?a:(o.V(b)>.4?b:-1);
+      if(i<0){fsHandF[p.i][k].x.reset();fsHandF[p.i][k].y.reset();return;}
+      const nx=.5+(o.X(i)-sx)/(sw*5.2),ny=.5+(o.Y(i)-sy)/(to*2.8),F2=fsHandF[p.i][k];
+      p.hands[k]={x:clamp(F2.x.f(nx,t),-.05,1.05)*W,y:clamp(F2.y.f(ny,t),-.05,1.05)*H};
+    });
+  }
 }
 function fsBlades(dt,t){
-  const hands=fsHands(t),mouseOn=t-mouse.t<.25;
-  S.blades.forEach((b,k)=>{
-    let p=null;
-    if(k<2&&hands[k])p=hands[k];
-    else if(k===2&&mouseOn)p={x:mouse.x,y:mouse.y};
+  fsTrack(t);
+  const p0=S.players[0],mouseOn=t-mouse.t<.25&&!p0.hands[0]&&!p0.hands[1];
+  if(mouseOn)p0.active=true;
+  for(const b of S.blades){
+    const pl=S.players[b.pl];let p=null;
+    if(!pl.out){if(b.k<2)p=pl.hands[b.k];else if(mouseOn)p={x:mouse.x,y:mouse.y};}
     b.pon=b.on;b.px=b.x;b.py=b.y;
-    if(!p){b.on=false;b.trail.length=0;if(k<2)fsF[k].x.reset(),fsF[k].y.reset();return;}
+    if(!p){b.on=false;b.trail.length=0;continue;}
     b.on=true;b.x=p.x;b.y=p.y;
     b.speed=b.pon?Math.hypot(b.x-b.px,b.y-b.py)/Math.max(dt,.001):0;
     b.trail.push({x:b.x,y:b.y,a:1});if(b.trail.length>14)b.trail.shift();
-  });
-  for(const b of S.blades)for(const q of b.trail)q.a-=dt*3.2;
-  for(const b of S.blades)while(b.trail.length&&b.trail[0].a<=0)b.trail.shift();
+  }
+  for(const b of S.blades){for(const q of b.trail)q.a-=dt*3.2;while(b.trail.length&&b.trail[0].a<=0)b.trail.shift();}
 }
 function segDist(px,py,ax,ay,bx,by){
   const dx=bx-ax,dy=by-ay,l2=dx*dx+dy*dy;let u=l2?((px-ax)*dx+(py-ay)*dy)/l2:0;u=clamp(u,0,1);
@@ -1418,22 +1480,24 @@ function segDist(px,py,ax,ay,bx,by){
 function fsPop(x,y,s,col,size=44){S.pops.push({x,y,s,col,size,t:0});}
 function fsSlice(o,b){
   o.hit=true;
-  const ang=Math.atan2(b.y-b.py,b.x-b.px);
+  const pl=S.players[b.pl],ang=Math.atan2(b.y-b.py,b.x-b.px);
   for(const side of[1,-1]){
     const nx=-Math.sin(ang)*side,ny=Math.cos(ang)*side;
     S.frags.push({o,side,ang,x:o.x,y:o.y,vx:o.vx*.6+nx*260,vy:o.vy*.6+ny*260,rot:o.rot,vr:o.vr+side*rand(1,3),life:1.3});
   }
   if(o.k==='nozzle'){
-    S.lives--;S.combo=0;S.flash=1;S.shake=.4;sfx.hit();fsPop(o.x,o.y,'Ouch! Hot nozzle',C.red,48);
-    if(S.lives<=0)fsEnd();return;
+    pl.lives--;pl.combo=0;S.flash=1;S.shake=.4;sfx.hit();fsPop(o.x,o.y,'Ouch! Hot nozzle',C.red,48);
+    if(pl.lives<=0){pl.out=true;fsPop(o.x,o.y+60,`Player ${pl.i+1} is out`,pl.col,40);if(fsActive().every(p=>p.out))fsEnd();}
+    return;
   }
-  S.combo++;S.comboT=1.3;S.sliced++;
-  const mult=Math.min(5,1+Math.floor(S.combo/4)),pts=(o.k==='pcb'?15:10)*mult;
-  S.score+=pts;fsPop(o.x,o.y-30,'+'+pts+(mult>1?'  x'+mult:''),o.k==='pcb'?C.green:C.orange);
-  beep(620+Math.min(S.combo,12)*60,.09,'sawtooth',.05,500);
+  pl.combo++;pl.comboT=1.3;pl.sliced++;
+  const mult=Math.min(5,1+Math.floor(pl.combo/4)),pts=(o.k==='pcb'?15:10)*mult;
+  pl.score+=pts;fsPop(o.x,o.y-30,'+'+pts+(mult>1?'  x'+mult:''),o.k==='pcb'?C.green:C.orange);
+  beep(620+Math.min(pl.combo,12)*60,.09,'sawtooth',.05,500);
 }
 function fsEnd(){
-  const a=fsBest();S.newBest=!a.length||S.score>a[0];a.push(S.score);a.sort((x,y)=>y-x);
+  const top=Math.max(...fsActive().map(p=>p.score));
+  const a=fsBest();S.newBest=!a.length||top>a[0];a.push(top);a.sort((x,y)=>y-x);
   try{localStorage.setItem('sl_slice_best',JSON.stringify(a.slice(0,5)));}catch(e){}
   sfx.over();go('fsover');
 }
@@ -1446,10 +1510,10 @@ function updateSlice(dt,t){
   }
   if(state!=='fsplay'){fsBlades(dt,t);return;}
   S.t+=dt;S.flash=Math.max(0,S.flash-dt*2.5);S.shake=Math.max(0,S.shake-dt);
-  S.comboT-=dt;if(S.comboT<=0&&S.combo)S.combo=0;
+  for(const p of S.players){p.comboT-=dt;if(p.comboT<=0&&p.combo)p.combo=0;}
   fsBlades(dt,t);
   S.nextWave-=dt;
-  if(S.nextWave<=0){fsWave();S.nextWave=rand(.9,1.6)*Math.max(.55,1-S.t/150);}
+  if(S.nextWave<=0){fsWave();S.nextWave=rand(.9,1.6)*Math.max(.55,1-S.t/150)/(fsActive().length>1?1.3:1);}
   for(const o of S.objs){
     o.vy+=FS.grav*dt;o.x+=o.vx*dt;o.y+=o.vy*dt;o.rot+=o.vr*dt;
     if(o.y<H)o.seen=true;
@@ -1459,7 +1523,7 @@ function updateSlice(dt,t){
     }
     if(state!=='fsplay')return;
   }
-  for(const o of S.objs)if(!o.hit&&o.seen&&o.vy>0&&o.y>H+110){o.hit=true;if(o.k!=='nozzle'){S.missed++;S.combo=0;}}
+  for(const o of S.objs)if(!o.hit&&o.seen&&o.vy>0&&o.y>H+110){o.hit=true;if(o.k!=='nozzle'){for(const p of fsActive())p.combo=0;}}
   S.objs=S.objs.filter(o=>!o.hit&&o.y<H+200);
   for(const f of S.frags){f.vy+=FS.grav*dt;f.x+=f.vx*dt;f.y+=f.vy*dt;f.rot+=f.vr*dt;f.life-=dt;}
   S.frags=S.frags.filter(f=>f.life>0&&f.y<H+250);
@@ -1493,11 +1557,25 @@ function fsArt(k,r,t){
     ctx.fillStyle='#ff4d5e';ctx.font=`700 ${r*.8}px ${FONT}`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('!',0,-r*.15);ctx.textBaseline='alphabetic';
   }
 }
+function fsPanels(){
+  const act=fsActive(),many=act.length>1,w=many?360:420,gap=20,total=act.length*w+(act.length-1)*gap;
+  let x=Math.max(330,CX-total/2+120);
+  for(const p of act){
+    const y=H-118;
+    rr(x,y,w,92,16);ctx.fillStyle='rgba(7,16,34,.82)';ctx.fill();ctx.lineWidth=4;ctx.strokeStyle=p.out?'#3a465e':p.col;ctx.stroke();
+    txt(many?`P${p.i+1}`:'Score',x+18,y+38,26,p.out?C.dim:p.col,'left',700);
+    txt(String(p.score),x+w-18,y+62,56,p.out?C.dim:C.text,'right',700);
+    if(p.out)txt('OUT',x+18,y+78,24,C.red,'left',700);
+    else for(let i=0;i<CFG.lives;i++){const cx=x+18+i*34,on=i<p.lives;
+      rr(cx,y+52,28,18,5);ctx.fillStyle=on?'rgba(77,255,154,.9)':'rgba(255,255,255,.12)';ctx.fill();}
+    if(p.combo>=3&&!p.out)txt(`Combo ${p.combo}`,x+18+CFG.lives*34+10,y+68,22,C.yellow,'left',700);
+    x+=w+gap;
+  }
+}
 function drawSlice(t){
   ctx.save();
   if(S.shake>0)ctx.translate(rand(-1,1)*S.shake*30,rand(-1,1)*S.shake*30);
   bgSpace(t);
-  // printer-bed grid hint
   ctx.strokeStyle='rgba(255,138,31,.07)';ctx.lineWidth=2;ctx.strokeRect(160,120,W-320,H-200);
   for(const o of S.objs){ctx.save();ctx.translate(o.x,o.y);ctx.rotate(o.rot);fsArt(o.k,o.r,t);ctx.restore();}
   for(const f of S.frags){
@@ -1506,47 +1584,57 @@ function drawSlice(t){
     ctx.rotate(f.rot-f.ang);fsArt(f.o.k,f.o.r,t);ctx.restore();
   }
   for(const b of S.blades){
+    const col=S.players[b.pl].col;
     if(b.trail.length>1){
       ctx.lineCap='round';
       for(let i=1;i<b.trail.length;i++){
         const a=b.trail[i-1],c=b.trail[i];
-        ctx.strokeStyle=b.col;ctx.globalAlpha=clamp(c.a,0,1)*.9;ctx.lineWidth=4+14*clamp(c.a,0,1);
+        ctx.strokeStyle=col;ctx.globalAlpha=clamp(c.a,0,1)*.9;ctx.lineWidth=4+14*clamp(c.a,0,1);
         ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(c.x,c.y);ctx.stroke();
       }
       ctx.globalAlpha=1;
     }
-    if(b.on){ctx.save();ctx.shadowColor=b.col;ctx.shadowBlur=24;ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(b.x,b.y,12,0,7);ctx.fill();ctx.restore();}
+    if(b.on){ctx.save();ctx.shadowColor=col;ctx.shadowBlur=24;ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(b.x,b.y,12,0,7);ctx.fill();ctx.restore();}
   }
   for(const p of S.pops){
     ctx.globalAlpha=clamp(1.4-p.t*1.2,0,1);txt(p.s,p.x,p.y-p.t*70,p.size,p.col,'center',700);
   }
   ctx.globalAlpha=1;ctx.restore();
   if(S.flash>0){ctx.fillStyle=`rgba(255,77,94,${S.flash*.35})`;ctx.fillRect(0,0,W,H);}
-  // HUD
   brand(50,84,52);
-  txt('Score',W-60,64,26,C.dim,'right',500);txt(String(S.score),W-60,130,80,C.text,'right',700);
   const left=Math.max(0,CFG.roundSeconds-S.t),bw=700;
   rr(CX-bw/2,38,bw,22,11);ctx.fillStyle='rgba(255,255,255,.12)';ctx.fill();
   rr(CX-bw/2,38,Math.max(8,bw*left/CFG.roundSeconds),22,11);ctx.fillStyle=left<10?C.red:C.cyan;ctx.fill();
   txt(Math.ceil(left)+' s',CX,96,34,C.text,'center',700);
-  for(let i=0;i<CFG.lives;i++){const x=CX-((CFG.lives-1)*60)/2+i*60-22,on=i<S.lives;
-    rr(x,112,44,24,6);ctx.fillStyle=on?'rgba(77,255,154,.9)':'rgba(255,255,255,.1)';ctx.fill();
-    ctx.fillStyle=on?'rgba(77,255,154,.9)':'rgba(255,255,255,.1)';ctx.fillRect(x+44,119,5,10);}
-  if(S.combo>=3){const m=Math.min(5,1+Math.floor(S.combo/4));
-    txt(`Combo ${S.combo}`+(m>1?`   x${m}`:''),60,170,40,C.yellow,'left',700);}
+  fsPanels();
   drawCam(40,H-190,260,146,false);
 }
 function fsDraw(t){
   if(state==='fsover'){
     drawSlice(t);
-    ctx.fillStyle='rgba(3,8,18,.8)';ctx.fillRect(0,0,W,H);
-    txt(S.lives<=0?'Nozzle burn!':'Print complete',CX,220,92,S.lives<=0?C.orange:C.green,'center',700);
-    txt('Score',CX,320,32,C.dim,'center',500);txt(String(S.score),CX,420,130,C.text,'center',700);
-    if(S.newBest)txt('New best!',CX,480,40,C.yellow,'center',700);
-    else txt(`${S.sliced} parts sliced   ·   ${S.missed} missed`,CX,480,32,C.yellow,'center',600);
-    const b=fsBest();txt('Top scores',CX,560,28,C.dim,'center',500);
-    b.slice(0,5).forEach((s,i)=>txt(`${i+1}.  ${s}`,CX,602+i*38,30,s===S.score&&i===b.indexOf(S.score)?C.yellow:C.text,'center',600));
-    rcBtn('fs:again','Play again',CX-440,840,400,130,true,true);
+    ctx.fillStyle='rgba(3,8,18,.84)';ctx.fillRect(0,0,W,H);
+    const act=fsActive().slice().sort((a,b)=>b.score-a.score);
+    if(act.length>1){
+      const tie=act[0].score===act[1].score;
+      txt(tie?'It\'s a tie!':`Player ${act[0].i+1} wins!`,CX,200,92,tie?C.yellow:act[0].col,'center',700);
+      act.forEach((p,i)=>{
+        const y=270+i*110,x=CX-420;
+        rr(x,y,840,92,18);ctx.fillStyle='rgba(15,35,66,.9)';ctx.fill();ctx.lineWidth=4;ctx.strokeStyle=p.col;ctx.stroke();
+        txt(`${i+1}.`,x+30,y+62,44,i===0?C.yellow:C.text,'left',700);
+        txt(`Player ${p.i+1}`,x+110,y+60,38,p.col,'left',700);
+        txt(`${p.sliced} sliced`,x+520,y+58,26,C.dim,'right',500);
+        txt(String(p.score),x+810,y+64,54,C.text,'right',700);
+      });
+    }else{
+      const p=act[0];
+      txt(p.out?'Nozzle burn!':'Print complete',CX,220,92,p.out?C.orange:C.green,'center',700);
+      txt('Score',CX,320,32,C.dim,'center',500);txt(String(p.score),CX,420,130,C.text,'center',700);
+      if(S.newBest)txt('New best!',CX,480,40,C.yellow,'center',700);
+      else txt(`${p.sliced} parts sliced`,CX,480,32,C.yellow,'center',600);
+      const b=fsBest();txt('Top scores',CX,560,28,C.dim,'center',500);
+      b.slice(0,5).forEach((s,i)=>txt(`${i+1}.  ${s}`,CX,602+i*38,30,s===p.score&&i===b.indexOf(p.score)?C.yellow:C.text,'center',600));
+    }
+    rcBtn('fs:again','Play again',CX-440,840,400,130,true,true,true);
     rcBtn('menu','Back to menu',CX+40,840,400,130,true,false);
     drawCam(40,H-250,350,197);
     return;
@@ -1556,10 +1644,12 @@ function fsDraw(t){
     const n=3-Math.floor(stateT);
     ctx.fillStyle='rgba(3,8,18,.5)';ctx.fillRect(0,0,W,H);
     txt(n>0?String(n):'Go!',CX,560,260,n>0?C.text:C.green,'center',700);
-    txt('Swipe your hands through spools and circuit boards',CX,720,40,C.text,'center',600);
-    txt('Avoid the red-hot nozzles!',CX,775,36,C.red,'center',700);
-    if(!camMode())txt('Mouse mode: move the mouse quickly across the parts',CX,830,28,C.dim,'center',500);
-  }else if(camMode()&&!tracked(t)&&t-mouse.t>1)txt('Step back into the camera view',CX,H-60,32,C.orange,'center',600);
+    txt('Swipe your hands through spools and circuit boards',CX,700,40,C.text,'center',600);
+    txt('Avoid the red-hot nozzles!',CX,752,36,C.red,'center',700);
+    const k=fsActive().length;
+    txt(k>1?`${k} players spotted. Everyone scores on their own.`:'Up to 3 players: stand side by side in front of the camera.',CX,806,28,C.cyan,'center',600);
+    if(!camMode())txt('Mouse mode: move the mouse quickly across the parts',CX,856,28,C.dim,'center',500);
+  }else if(camMode()&&!(P.all&&P.all.length)&&t-mouse.t>1)txt('Step back into the camera view',CX,H-150,32,C.orange,'center',600);
 }
 
 /* =====================================================================

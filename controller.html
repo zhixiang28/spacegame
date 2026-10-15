@@ -140,7 +140,8 @@
   </div>
 
   <div id="ov"><div class="t" id="ovT"></div><div class="s" id="ovS"></div>
-    <button class="big" id="ovBtn" style="display:none"></button></div>
+    <button class="big" id="ovBtn" style="display:none"></button>
+    <button class="big" id="ovBtn2" style="display:none;border-color:var(--cyan);background:rgba(53,224,255,.1)"></button></div>
 </div>
 
 <div id="rotate">
@@ -224,7 +225,7 @@ function onMotion(e){
 function recenter(){center=thS;}
 function tiltSteer(){
   thS+=(th-thS)*.4;
-  const d=thS-center,dead=3,max=38;
+  const d=thS-center,dead=3,max=30;
   let s=(Math.abs(d)<dead)?0:(Math.abs(d)-dead)/(max-dead)*Math.sign(d);
   s=clamp(s,-1,1);s=Math.sign(s)*Math.pow(Math.abs(s),1.2);
   return s;
@@ -278,9 +279,10 @@ $('enableBtn').onclick=async()=>{
 
 /* ---------- HUD + overlay ---------- */
 const ord=n=>['1st','2nd','3rd','4th','5th','6th'][n-1]||n+'th';
-function setOv(t,s,btn,fn){
+function setOv(t,s,btn,fn,btn2,fn2){
   const on=!!(t||s);$('ov').classList.toggle('on',on);$('ovT').textContent=t||'';$('ovS').textContent=s||'';
   const b=$('ovBtn');b.style.display=btn?'':'none';b.textContent=btn||'';b.onclick=fn||null;
+  const b2=$('ovBtn2');b2.style.display=btn2?'':'none';b2.textContent=btn2||'';b2.onclick=fn2||null;
 }
 let tempOv=0;function setOvTemp(t,s){setOv(t,s);tempOv=performance.now()+2500;}
 let lastPh='';
@@ -302,7 +304,7 @@ function renderHud(){
   }else if(hud.ph==='race'){
     if(hud.fin)setOv('Finished '+ord(hud.pos)+'!',hud.ft||'');else setOv('','');
   }else if(hud.ph==='rresult'){
-    setOv(ord(hud.pos)+' place',hud.ft||'',hud.first?'NEXT RACE':'',()=>send({t:'start'}));
+    setOv(ord(hud.pos)+' place',hud.ft||'',hud.first?'NEXT RACE':'',()=>send({t:'start'}),hud.first?'BACK TO MENU':'',()=>send({t:'menu'}));
   }else setOv('Waiting for the TV…','Pick Circuit Racers on the big screen.');
 }
 
