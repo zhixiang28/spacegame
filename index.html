@@ -262,6 +262,7 @@ function press(id){
   if(id==='game:runner'||id==='again')startFlow();
   else if(id==='game:racer'||id==='rc:lobby')rcEnterLobby();
   else if(id==='game:slice'||id==='fs:again')startSlice();
+  else if(id==='rc:wifi')rcSetupWifi();
   else if(id==='rc:start'||id==='rc:again')rcStartRace();
   else if(id==='menu')go('menu');
 }
@@ -399,6 +400,18 @@ function bgSpace(t){
   for(const s of stars){const y=(s.y+t*s.s)%H;ctx.globalAlpha=.25+.45*((s.r-.8)/1.8);
     ctx.beginPath();ctx.arc(s.x,y,s.r,0,7);ctx.fill();}
   ctx.globalAlpha=1;
+}
+/* small Exit button on the right edge during every game: hold the hand cursor on it, or click it (Esc / M also work) */
+const EXIT_STATES=['calib','countdown','play','fscount','fsplay','rcount','race'];
+function drawExitBtn(){
+  if(!EXIT_STATES.includes(state))return;
+  const x=W-150,y=H/2-30,w=140,h=60,hv=inRect(ptr,x,y,w,h);
+  addBtn('menu',x,y,w,h,true);
+  ctx.save();ctx.globalAlpha=hv?1:.6;
+  rr(x,y,w,h,16);ctx.fillStyle='rgba(7,16,34,.85)';ctx.fill();ctx.lineWidth=hv?5:3;ctx.strokeStyle=hv?C.orange:C.dim;ctx.stroke();
+  txt('✕ Exit',x+w/2,y+40,28,C.text,'center',700);
+  const p=prog('menu');if(p>0){rr(x+14,y+h-12,(w-28)*p,6,3);ctx.fillStyle=C.orange;ctx.fill();}
+  ctx.restore();
 }
 function drawCursor(){
   if(!ptr.on)return;
@@ -842,7 +855,7 @@ function netData(conn,d){
   s.last=performance.now();
   if(d.t==='in'){s.in.s=clamp(+d.s||0,-1,1);s.in.g=d.g?1:0;s.in.b=d.b?1:0;s.in.n=d.n?1:0;}
   else if(d.t==='start'&&s.i===netFirst()&&(state==='lobby'||state==='rresult'))rcStartRace();
-  else if(d.t==='menu'&&s.i===netFirst()&&(state==='lobby'||state==='rresult'))go('menu');
+  else if(d.t==='menu'&&s.i===netFirst()&&RC_STATES.includes(state))go('menu');
 }
 const netFirst=()=>{const s=NET.slots.find(x=>x&&x.conn);return s?s.i:-1;};
 const netCount=()=>NET.slots.filter(x=>x&&x.conn).length;
@@ -1244,7 +1257,7 @@ function rcViewHud(v,vw,vh,t){
   rr(bx,by,bw,18*u,9*u);ctx.fillStyle='rgba(255,255,255,.14)';ctx.fill();
   if(v.nitro>.01){rr(bx,by,bw*v.nitro,18*u,9*u);ctx.fillStyle=v.boosting?C.orange:C.cyan;ctx.fill();}
   txt('NITRO',bx,by-8*u,18*u,C.dim,'left',600);
-  if(single)rcStandings(vw-300,110,282,34,24,v);
+  if(single)rcStandings(vw-300,128,282,34,24,v);
   if(rc.cars.length&&!single){ctx.lineWidth=4;ctx.strokeStyle=v.color;ctx.strokeRect(2,2,vw-4,vh-4);}
   // countdown / finish banners
   if(state==='rcount'){
@@ -1335,7 +1348,8 @@ function rcDrawLobby(t){
   else rcBtn('rc:start','Start race (keyboard / mouse click)',730,810,760,130,true,true,true);
   rcBtn('menu','Back to menu',1530,810,320,130,true,false);
   txt('The race starts from the phone, so waving at the TV will not start it.  Empty seats get CPU racers.',730,980,24,C.dim,'left',500);
-  txt(rcWifiQR?'Press W to change or remove the Wi-Fi QR':'Press W to add a Wi-Fi QR so phones can join your network',730,1056,20,C.dim,'left',500);
+  rcBtn('rc:wifi',rcWifiQR?'Change Wi-Fi QR':'Add Wi-Fi QR',70,935,480,100,true,false,true);
+  txt('Mouse click or press W. Shows a QR so phones can join your Wi-Fi first.',70,1060,20,C.dim,'left',500);
   if(rc.best)txt(`Fastest lap  ${fmtT(rc.best.t)}  (${rc.best.name})`,730,1020,26,C.yellow,'left',600);
   drawCam(W-310,36,260,146,false);
 }
@@ -1692,6 +1706,7 @@ function draw(t){
   else if(state==='over')drawOver(t);
   else if(RC_STATES.includes(state))rcDraw(t);
   else if(FS_STATES.includes(state))fsDraw(t);
+  drawExitBtn();
   drawCursor();
 }
 let last=performance.now();

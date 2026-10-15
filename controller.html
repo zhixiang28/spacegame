@@ -110,6 +110,7 @@
     <label><input type="checkbox" id="optInvert"> Invert steering</label>
     <label><input type="checkbox" id="optTouch"> Touch wheel (no tilt)</label>
     <button id="recenter">Re-centre wheel</button>
+    <button id="menuBtn" style="display:none;border-color:var(--red)">Exit to TV menu</button>
   </div>
 
   <div class="side l">
@@ -258,6 +259,7 @@ $('optAuto').onchange=e=>{opt.auto=e.target.checked;store.set('auto',opt.auto);a
 $('optInvert').onchange=e=>{opt.invert=e.target.checked;store.set('invert',opt.invert);};
 $('optTouch').onchange=e=>{opt.touch=e.target.checked;store.set('touch',opt.touch);applyOpts();};
 $('recenter').onclick=()=>{recenter();$('settings').classList.remove('on');};
+$('menuBtn').onclick=()=>{if(confirm('Leave the game and go back to the TV menu for everyone?')){send({t:'menu'});$('settings').classList.remove('on');}};
 function applyOpts(){$('gas').classList.toggle('auto',opt.auto);$('gas').innerHTML=opt.auto?'AUTO<small>GAS ON</small>':'GAS';
   wheelEl.classList.toggle('touch',useTouch());}
 
@@ -287,6 +289,7 @@ function setOv(t,s,btn,fn,btn2,fn2){
 let tempOv=0;function setOvTemp(t,s){setOv(t,s);tempOv=performance.now()+2500;}
 let lastPh='';
 function renderHud(){
+  $('menuBtn').style.display=hud.first?'':'none';
   $('speed').innerHTML=Math.round(hud.spd||0)+'<small>km/h</small>';
   $('info').textContent=hud.ph==='lobby'?'':`LAP ${hud.lap}/${hud.laps}   ·   ${ord(hud.pos)} of ${hud.of}`;
   $('nitroFill').style.transform=`scaleX(${clamp(hud.n||0,0,1)})`;
