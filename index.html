@@ -239,7 +239,7 @@ const cal={samples:[],msg:'',prog:0,ok:false};
 let cdLast=-1;
 
 function go(s){state=s;stateT=0;lock=.6;hov={id:null,t:0};cdLast=-1;}
-function addBtn(id,x,y,w,h,on=true){buttons.push({id,x,y,w,h,on});}
+function addBtn(id,x,y,w,h,on=true,noHand=false){buttons.push({id,x,y,w,h,on,noHand});}
 const inRect=(p,x,y,w,h)=>p.on&&p.x>=x&&p.x<=x+w&&p.y>=y&&p.y<=y+h;
 function pointer(t){
   if(t-mouse.t<4)return{x:mouse.x,y:mouse.y,on:true,src:'mouse'};
@@ -249,7 +249,7 @@ function pointer(t){
 function updateUI(dt,t){
   ptr=pointer(t);
   let h=null;
-  if(ptr.on)for(const b of buttons)if(b.on&&inRect(ptr,b.x,b.y,b.w,b.h)){h=b;break;}
+  if(ptr.on)for(const b of buttons)if(b.on&&!(b.noHand&&ptr.src==='hand')&&inRect(ptr,b.x,b.y,b.w,b.h)){h=b;break;}
   if(!h||lock>0){hov={id:null,t:0};return;}
   if(hov.id!==h.id)hov={id:h.id,t:0};
   hov.t+=dt;
@@ -751,7 +751,7 @@ rc.best=(()=>{try{return JSON.parse(localStorage.getItem('sl_racer_best')||'null
 const rcKeys={l:0,r:0,g:0,b:0,n:0};
 
 /* ---------------- network: host side ---------------- */
-const NET={peer:null,id:null,ready:false,err:'',url:'',slots:[null,null,null,null]};
+const NET={peer:null,id:null,ready:false,err:'',url:'',slots:[null,null,null,null],tries:0,lastTry:0};
 const SIGNAL=(()=>{const s=new URLSearchParams(location.search).get('signal');if(!s)return null;
   const[h,p,sec]=s.split(':');return{host:h,port:+p||9000,secure:sec==='1'||sec==='s',path:'/'};})();
 let rcQR=null;
@@ -779,10 +779,14 @@ function netInit(){
   p.on('disconnected',()=>{NET.ready=false;setTimeout(()=>{try{p.reconnect();}catch(e){}},1500);});
   p.on('error',e=>{
     if(e.type==='unavailable-id'){NET.peer=null;netInit();}
-    else if(e.type!=='peer-unavailable')NET.err='Network problem: '+e.type;
+    else if(e.type!=='peer-unavailable'){
+      NET.err='Network problem: '+e.type+'. Retrying…';NET.ready=false;
+      try{p.destroy();}catch(_){}NET.peer=null;setTimeout(()=>{if(state==='lobby')netInit();},3000);
+    }
   });
 }
 function netAccept(conn){
+  NET.tries++;NET.lastTry=performance.now();
   conn.on('data',d=>netData(conn,d));
   conn.on('close',()=>netDrop(conn));
   conn.on('error',()=>netDrop(conn));
@@ -1277,7 +1281,10 @@ function rcDrawLobby(t){
   }
   txt('Scan with your phone camera',qx+qs/2,qy+qs+66,34,C.text,'center',700);
   if(NET.url){ctx.font=`500 20px ${FONT}`;let u=NET.url.replace(/^https?:\/\//,'');if(u.length>46)u=u.slice(0,43)+'…';txt(u,qx+qs/2,qy+qs+100,20,C.dim,'center',500);}
-  if(location.protocol==='file:')txt('Open this page over https (e.g. GitHub Pages) so phones can reach it',qx+qs/2,qy+qs+140,20,C.red,'center',600);
+  const local=/^(localhost|127\.|\[::1\])/.test(location.hostname)||location.protocol==='file:';
+  if(local)wrap('This page is open as '+(location.protocol==='file:'?'a local file':location.host)+'. Phones cannot reach that address. Open the https link (e.g. GitHub Pages) on this TV instead.',qx+qs/2,qy+qs+135,qs+20,20,26,C.red,'center');
+  const relay=NET.ready?'Relay online':(NET.err||'Connecting to relay…');
+  txt(relay+(NET.tries?`   ·   ${NET.tries} phone attempt${NET.tries>1?'s':''}`:''),qx+qs/2,qy+qs+(local?215:132),20,NET.ready?C.green:C.orange,'center',600);
   // how to
   const steps=['Scan the QR code','Tap “Enable steering”','Hold the phone like a wheel'];
   steps.forEach((s,i)=>{const y=290+i*70;ctx.fillStyle=C.orange;ctx.beginPath();ctx.arc(760,y-10,24,0,7);ctx.fill();txt(String(i+1),760,y-1,28,'#1a0d00','center',700);txt(s,806,y,32,C.text,'left',600);});
@@ -1297,19 +1304,21 @@ function rcDrawLobby(t){
   }
   // buttons
   const n=netCount();
-  rcBtn('rc:start',n?`Start race  (${n} player${n>1?'s':''})`:'Start race (keyboard)',730,810,760,130,true,true);
+  if(n)rcBtn('rc:start','Waiting for Player 1 to press START on their phone',730,810,760,130,false,true,true);
+  else rcBtn('rc:start','Start race (keyboard / mouse click)',730,810,760,130,true,true,true);
   rcBtn('menu','Back to menu',1530,810,320,130,true,false);
-  txt('Empty seats are filled by CPU racers.  Keyboard: arrows or WASD, space = nitro',730,980,24,C.dim,'left',500);
+  txt('The race starts from the phone, so waving at the TV will not start it.  Empty seats get CPU racers.',730,980,24,C.dim,'left',500);
   if(rc.best)txt(`Fastest lap  ${fmtT(rc.best.t)}  (${rc.best.name})`,730,1020,26,C.yellow,'left',600);
-  drawCam(40,H-250,350,197);
+  drawCam(W-310,36,260,146,false);
 }
-function rcBtn(id,label,x,y,w,h,on,primary){
-  addBtn(id,x,y,w,h,on);
-  const hv=on&&inRect(ptr,x,y,w,h);
+function rcBtn(id,label,x,y,w,h,on,primary,noHand=false){
+  addBtn(id,x,y,w,h,on,noHand);
+  const hv=on&&!(noHand&&ptr.src==='hand')&&inRect(ptr,x,y,w,h);
   ctx.save();if(hv){ctx.shadowColor=C.orange;ctx.shadowBlur=36;}
   rr(x,y,w,h,22);ctx.fillStyle=primary?'rgba(255,138,31,.18)':'rgba(53,224,255,.1)';ctx.fill();
   ctx.lineWidth=hv?7:4;ctx.strokeStyle=primary?C.orange:C.cyan;ctx.stroke();ctx.restore();
-  txt(label,x+w/2,y+h/2+16,44,C.text,'center',700);
+  ctx.font=`700 44px ${FONT}`;const fit=Math.min(44,44*(w-50)/ctx.measureText(label).width);
+  txt(label,x+w/2,y+h/2+fit*.36,fit,on?C.text:C.dim,'center',700);
   const p=prog(id);if(p>0){rr(x+30,y+h-24,(w-60)*p,10,5);ctx.fillStyle=C.orange;ctx.fill();}
 }
 function rcDrawResults(t){
@@ -1326,7 +1335,7 @@ function rcDrawResults(t){
     if(best!==null)txt('best lap '+fmtT(best),x+w-300,y+48,22,C.dim,'right',500);
     txt(c.finished?fmtT(c.finT):'DNF',x+w-30,y+52,36,c.finished?C.yellow:C.dim,'right',700);
   });
-  rcBtn('rc:again','Race again',CX-440,830,400,130,true,true);
+  rcBtn('rc:again','Race again',CX-440,830,400,130,true,true,true);
   rcBtn('rc:lobby','Change players',CX+40,830,400,130,true,false);
   txt('Back to menu: hold both hands up, or press M',CX,1010,24,C.dim,'center',500);
 }
@@ -1341,7 +1350,7 @@ addEventListener('keydown',e=>{
   else if(k==='arrowup'||k==='w')rcKeys.g=1;else if(k==='arrowdown'||k==='s')rcKeys.b=1;
   else if(k===' '||k==='shift')rcKeys.n=1;
   if(RC_STATES.includes(state)&&(k===' '||k.startsWith('arrow')))e.preventDefault();
-  if(k==='enter'&&state==='lobby')rcStartRace();
+  if(k==='enter'&&state==='lobby'&&!netCount())rcStartRace();
 });
 window.__racer={NET,rc,get state(){return state;}};   // handy for debugging in the console
 addEventListener('keyup',e=>{

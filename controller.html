@@ -168,22 +168,28 @@ function show(id){document.querySelectorAll('.screen').forEach(e=>e.classList.to
 function joinMsg(m,err,retry){$('joinMsg').textContent=m;$('joinMsg').className=err?'err':'';$('retry').style.display=retry?'':'none';}
 
 /* ---------- connection ---------- */
+let t1=0,t2=0;
+const TIPS=' Check: the TV is on the Circuit Racers lobby, your phone has internet, and the TV page was opened from the https link (not localhost).';
 function connect(){
+  clearTimeout(t1);clearTimeout(t2);
   if(!HOST){joinMsg('No game code. Scan the QR code on the TV.',true);return;}
   if(typeof Peer==='undefined'){joinMsg('Could not load the network library. Check your Wi-Fi.',true,true);return;}
   joinMsg('Connecting to the big screen…');
   try{ if(peer)peer.destroy(); }catch(e){}
+  t1=setTimeout(()=>joinMsg('Cannot reach the connection relay (step 1 of 2). Does your phone have internet? Some Wi-Fi networks block it; try mobile data.',true,true),10000);
   peer=new Peer(SIGNAL?{...SIGNAL}:undefined);
-  peer.on('open',()=>openConn());
+  peer.on('open',()=>{clearTimeout(t1);joinMsg('Found the relay. Finding the TV… (step 2 of 2)');openConn();});
   peer.on('error',e=>{
-    if(e.type==='peer-unavailable')joinMsg('Game not found. Is the TV still on the Racers lobby?',true,true);
-    else joinMsg('Connection problem ('+e.type+')',true,true);
+    clearTimeout(t1);clearTimeout(t2);
+    if(e.type==='peer-unavailable')joinMsg('Game not found. The TV lobby may have been refreshed: scan the new QR code.',true,true);
+    else joinMsg('Connection problem ('+e.type+').'+TIPS,true,true);
   });
   peer.on('disconnected',()=>{try{peer.reconnect();}catch(e){}});
 }
 function openConn(){
   conn=peer.connect(HOST,{serialization:'json'});
-  conn.on('open',()=>{conn.send({t:'hello'});});
+  clearTimeout(t2);t2=setTimeout(()=>{ if(!wanted)joinMsg('Could not link to the TV (step 2 of 2). If you are on a different network than the TV, or the Wi-Fi blocks device-to-device traffic, try the same Wi-Fi or mobile data.'+TIPS,true,true);},15000);
+  conn.on('open',()=>{clearTimeout(t2);conn.send({t:'hello'});});
   conn.on('data',onMsg);
   conn.on('close',()=>{ if(wanted){ setOv('Connection lost','Reconnecting…');setTimeout(()=>{ if(peer&&!peer.destroyed)openConn(); },1500);} else joinMsg('Disconnected.',true,true); });
   conn.on('error',()=>{});
@@ -191,7 +197,7 @@ function openConn(){
 function onMsg(d){
   if(!d||typeof d!=='object')return;
   if(d.t==='welcome'){
-    me.slot=d.slot;me.color=d.color;me.name=d.name;wanted=true;
+    clearTimeout(t2);me.slot=d.slot;me.color=d.color;me.name=d.name;wanted=true;
     document.documentElement.style.setProperty('--me',me.color);
     $('eSeat').textContent=me.name.toUpperCase();$('chip').textContent=me.name.toUpperCase();
     if(motionOn||opt.touch){show('pad');} else show('sEnable');
@@ -289,7 +295,7 @@ function renderHud(){
   }
   if(performance.now()<tempOv)return;
   if(hud.ph==='lobby'){
-    if(hud.first)setOv('Ready?','When everyone has scanned in, start the race.','START RACE',()=>send({t:'start'}));
+    if(hud.first)setOv('Ready?','Wait until everyone has joined, then start the race for everyone.','START RACE',()=>send({t:'start'}));
     else setOv('Waiting…','Player 1 starts the race.');
   }else if(hud.ph==='rcount'){
     const n=Math.ceil(hud.cd||0);setOv(n>0&&n<=3?String(n):'GO!','Hold the wheel steady');
