@@ -4,6 +4,12 @@
 <meta charset="utf-8">
 <title>SPACElogic Maker Space Arcade</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="theme-color" content="#050b16">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&display=swap" rel="stylesheet">
@@ -41,8 +47,9 @@
   <h1>SPACE<span>logic</span></h1>
   <h2>MAKER SPACE ARCADE</h2>
   <button id="startBtn">Start the station</button>
+  <button id="installBtn" style="display:none;font-size:clamp(14px,1.4vw,20px);padding:.4em 1.2em;border-color:var(--cyan)">Install as an app</button>
   <p>Allow camera access when asked. Stand 2 to 3 metres from the TV with the camera at chest height.
-     No camera? Mouse and arrow keys work for testing.</p>
+     No camera? Mouse and arrow keys work for testing. Press F any time to toggle full screen.</p>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
@@ -1620,10 +1627,24 @@ addEventListener('keydown',e=>{
 });
 addEventListener('keyup',e=>{if(e.key==='ArrowDown')kb.down=false;});
 
+async function goFull(){
+  try{if(!document.fullscreenElement)await document.documentElement.requestFullscreen({navigationUI:'hide'});}catch(e){}
+}
+addEventListener('keydown',e=>{      // F toggles full screen
+  if(e.key==='f'||e.key==='F'){
+    if(document.fullscreenElement)document.exitFullscreen();else goFull();
+  }
+});
+let installEv=null;
+addEventListener('beforeinstallprompt',e=>{e.preventDefault();installEv=e;document.getElementById('installBtn').style.display='';});
+document.getElementById('installBtn').addEventListener('click',async()=>{
+  if(!installEv)return;installEv.prompt();await installEv.userChoice;installEv=null;document.getElementById('installBtn').style.display='none';
+});
 document.getElementById('startBtn').addEventListener('click',async()=>{
   document.getElementById('start').style.display='none';
   try{actx=new (window.AudioContext||window.webkitAudioContext)();}catch(e){}
-  try{await document.documentElement.requestFullscreen?.();}catch(e){}
+  goFull();
+  if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
   requestAnimationFrame(frame);
   await initCam();
   if(camOK)await initModel();

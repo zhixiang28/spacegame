@@ -20,3 +20,7 @@ Swipe both hands (or the mouse) fast through flying filament spools (+10) and ci
 Avoid the red-hot nozzles: each one you slice costs a power cell (3 lives). A shift lasts 75 s.
 
 Files: `index.html` (TV: menu, Maker Run, Circuit Racers), `controller.html` (phone).
+
+## Full screen and install
+- The TV page goes full screen when you press **Start the station** (press **F** to toggle).
+- In Chrome or Edge, use **Install as an app** on the start screen (or the install icon in the address bar) to get a desktop icon that opens full screen with no browser bars. Needs https.
