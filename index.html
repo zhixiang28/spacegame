@@ -34,7 +34,7 @@
     border:3px solid var(--orange);background:rgba(255,138,31,.12);color:var(--text);cursor:pointer}
   #start button:hover,#start button:focus-visible{background:var(--orange);color:#1a0d00;outline:none}
   #start p{margin:18px 0 0;max-width:640px;color:#8fb0d6;font-size:clamp(14px,1.4vw,19px);line-height:1.5}
-  #start img{max-height:84px}
+  #start img{max-height:clamp(70px,18vh,200px);max-width:80vw}
 </style>
 </head>
 <body>
@@ -42,8 +42,8 @@
 <video id="cam" playsinline muted></video>
 
 <div id="start">
-  <!-- Optional: drop a logo.png next to this file and it shows up here and in the menu -->
-  <img src="logo.png" alt="" onerror="this.remove()">
+  <!-- logo.png (transparent) is the SPACElogic logo; the text version is the fallback if it is missing -->
+  <img src="logo.png" alt="SPACElogic" onload="document.querySelector('#start h1').style.display='none'" onerror="this.remove()">
   <h1>SPACE<span>logic</span></h1>
   <h2>MAKER SPACE ARCADE</h2>
   <button id="startBtn">Start the station</button>
@@ -100,7 +100,9 @@ function wrap(s,x,y,maxW,size,lh,col,align='left'){
     if(ctx.measureText(t).width>maxW&&line){txt(line,x,y,size,col,align,500);y+=lh;line=w;}else line=t;}
   if(line)txt(line,x,y,size,col,align,500);return y;}
 const BRAND={a:'#cf8c2a',b:'#898d8e'};     // SPACElogic logo colours: gold + grey
+function brandW(size){if(logoOK)return logo.width/logo.height*size*1.05;ctx.font=`700 ${size}px ${FONT}`;return ctx.measureText(CFG.brand1+CFG.brand2).width;}
 function brand(x,y,size){
+  if(logoOK){const h=size*1.05;ctx.drawImage(logo,x,y-h*.74,logo.width/logo.height*h,h);return;}   // the real logo, baseline at y
   ctx.font=`700 ${size}px ${FONT}`;const w1=ctx.measureText(CFG.brand1).width;
   txt(CFG.brand1,x,y,size,BRAND.a,'left',700);txt(CFG.brand2,x+w1,y,size,BRAND.b,'left',700);}
 
@@ -478,8 +480,7 @@ function cardArt(kind,cx,cy,t){
 }
 function drawMenu(t){
   bgSpace(t);
-  if(logoOK){const h=84,w=logo.width/logo.height*h;ctx.drawImage(logo,60,48,w,h);brand(60+w+24,120,82);}
-  else brand(60,125,92);
+  brand(60,125,92);
   txt(CFG.sub,64,184,30,C.orange,'left',600);
   const best=loadBest()[0];
   txt('Best score',W-60,88,26,C.dim,'right',500);txt(best?String(best):'0',W-60,150,64,C.yellow,'right',700);
@@ -536,8 +537,7 @@ function drawRoom(t){
   // neon sign
   ctx.save();rr(560,70,800,170,18);ctx.fillStyle='#071022';ctx.fill();
   ctx.shadowColor=C.cyan;ctx.shadowBlur=26;ctx.lineWidth=5;ctx.strokeStyle=C.cyan;ctx.stroke();ctx.restore();
-  ctx.font=`700 108px ${FONT}`;
-  const bw=ctx.measureText('SPACElogic').width;
+  const bw=brandW(108);
   ctx.save();ctx.shadowColor=BRAND.a;ctx.shadowBlur=22;brand(CX-bw/2,172,108);ctx.restore();
   txt('MAKER SPACE',CX,226,34,C.orange,'center',600);
   // shelf with spools
