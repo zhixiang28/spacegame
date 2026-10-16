@@ -309,7 +309,8 @@ function renderHud(){
     if(hud.fin)setOv('Finished '+ord(hud.pos)+'!',hud.ft||'');else setOv('','');
   }else if(hud.ph==='rresult'){
     setOv(ord(hud.pos)+' place',hud.ft||'',hud.first?'NEXT RACE':'',()=>send({t:'start'}),hud.first?'BACK TO MENU':'',()=>send({t:'menu'}));
-  }else setOv('Waiting for the TV…','Pick Circuit Racers on the big screen.');
+  }else if(hud.ph==='outro')setOv('Welcome to SPACElogic','Presented by MAKER SPACE. Thanks for racing!');
+  else setOv('Waiting for the TV…','Pick Circuit Racers on the big screen.');
 }
 
 /* ---------- sending ---------- */

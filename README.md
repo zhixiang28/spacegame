@@ -25,6 +25,15 @@ Files: `index.html` (TV: menu, Maker Run, Circuit Racers), `controller.html` (ph
 - The TV page goes full screen when you press **Start the station** (press **F** to toggle).
 - In Chrome or Edge, use **Install as an app** on the start screen (or the install icon in the address bar) to get a desktop icon that opens full screen with no browser bars. Needs https.
 
+## Escape Protocol (finger pinch)
+A 2D escape room controlled with one hand: pinch thumb and index finger to press, keep pinching to drag.
+Pick one of three missions: **Orbital** (stop a space-station reactor), **Nexus Lab** (escape a rogue AI's lockdown) or **Abyss-7** (get out of a flooding deep-sea base).
+Each mission has four puzzles in five minutes: sweep a UV scanner to find the code, rewire the circuit, tune a signal, then type the code and pull the lever.
+Wrong moves cost time. Stand about 1 to 1.5 m from the camera so it can see your fingers. The narrator speaks; press **V** to mute. No camera? Use the mouse (click and drag).
+
+## After every game
+A short "Welcome to SPACElogic, presented by MAKER SPACE" screen with the Maker Space sign (`makerspace.jpg`) plays before the results.
+
 ## Wi-Fi QR in the racers lobby
 Press **W** in the Circuit Racers lobby to enter the Wi-Fi name and password. A second QR code then appears so phones can join your network first.
 It is saved only in that browser (localStorage), not in the repo, so the password is never published.
