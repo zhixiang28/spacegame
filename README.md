@@ -32,7 +32,7 @@ Each mission has four puzzles in five minutes: sweep a UV scanner to find the co
 Wrong moves cost time. Stand about 1 to 1.5 m from the camera so it can see your fingers. The narrator speaks; press **V** to mute. No camera? Use the mouse (click and drag).
 
 ## After every game
-A short "Welcome to SPACElogic, presented by MAKER SPACE" screen with the Maker Space sign (`makerspace.jpg`) plays before the results.
+A short "Welcome to SPACElogic, presented by MAKER SPACE" screen with the MAKER SPACE logo (drawn in code, no image file) plays before the results.
 
 ## Wi-Fi QR in the racers lobby
 Press **W** in the Circuit Racers lobby to enter the Wi-Fi name and password. A second QR code then appears so phones can join your network first.

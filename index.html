@@ -2296,7 +2296,54 @@ function esDraw(t){
 /* =====================================================================
    OUTRO after every game: "Welcome to SPACElogic, presented by MAKER SPACE"
    ===================================================================== */
-const msImg=new Image();let msOK=false;msImg.onload=()=>msOK=true;msImg.src='makerspace.jpg';
+/* MAKER SPACE logo, redrawn as vector art (gears + bold lettering) */
+function toothGear(cx,cy,r,teeth,rot,fill,hole){
+  ctx.save();ctx.translate(cx,cy);ctx.rotate(rot);ctx.fillStyle=fill;ctx.beginPath();
+  const n=teeth*4;
+  for(let i=0;i<n;i++){const a=i/n*Math.PI*2,rad=(i%4===0||i%4===3)?r*.9:r;ctx.lineTo(Math.cos(a)*rad,Math.sin(a)*rad);}
+  ctx.closePath();ctx.fill();
+  if(hole){ctx.globalCompositeOperation='destination-out';ctx.beginPath();ctx.arc(0,0,r*hole,0,7);ctx.fill();}
+  ctx.restore();
+}
+function drawMakerLogo(cx,cy,k){
+  const t=performance.now()/1000,w=640*k,h=300*k;
+  ctx.save();ctx.translate(cx,cy);ctx.scale(k,k);
+  // perforated metal backing
+  ctx.save();ctx.beginPath();ctx.roundRect(-290,-120,590,270,10);ctx.clip();
+  ctx.fillStyle='#14161a';ctx.fillRect(-300,-130,610,290);
+  ctx.fillStyle='rgba(215,220,226,.55)';
+  for(let y=-130;y<160;y+=16)for(let x=-300+((y/16)%2?8:0);x<310;x+=16){ctx.beginPath();ctx.arc(x,y,4,0,7);ctx.fill();}
+  ctx.restore();
+  // gears, silver and copper
+  const g=(cx2,cy2,r,tt,rot,col1,col2)=>{
+    const gr=ctx.createLinearGradient(cx2-r,cy2-r,cx2+r,cy2+r);gr.addColorStop(0,col1);gr.addColorStop(1,col2);
+    ctx.save();ctx.globalCompositeOperation='source-over';ctx.beginPath();ctx.rect(-300,-300,900,700);
+    const off=document.createElement('canvas');off.width=off.height=Math.ceil(r*2.3);const o=off.getContext('2d');
+    o.translate(off.width/2,off.height/2);o.rotate(rot);o.fillStyle=gr;o.beginPath();
+    const n=tt*4;for(let i=0;i<n;i++){const a=i/n*Math.PI*2,rad=(i%4===0||i%4===3)?r*.9:r;o.lineTo(Math.cos(a)*rad,Math.sin(a)*rad);}
+    o.closePath();o.fill();o.globalCompositeOperation='destination-out';o.beginPath();o.arc(0,0,r*.3,0,7);o.fill();
+    o.globalCompositeOperation='source-over';o.strokeStyle='rgba(0,0,0,.35)';o.lineWidth=3;o.beginPath();o.arc(0,0,r*.3,0,7);o.stroke();
+    ctx.drawImage(off,cx2-off.width/2,cy2-off.height/2);ctx.restore();};
+  ctx.save();ctx.beginPath();ctx.roundRect(-290,-120,590,270,10);ctx.clip();
+  g(195,5,98,36,t*.08,'#f1f3f5','#8c939b');
+  g(112,-78,40,14,-t*.24,'#e3a074','#8a4f2c');
+  g(112,88,44,16,-t*.22,'#e3a074','#8a4f2c');
+  g(-262,-118,60,18,t*.2,'#d9dde1','#7f868e');
+  ctx.restore();
+  // glass plate
+  ctx.beginPath();ctx.roundRect(-290,-95,560,222,8);
+  const gl=ctx.createLinearGradient(-290,-95,270,105);gl.addColorStop(0,'rgba(20,22,26,.78)');gl.addColorStop(.55,'rgba(20,22,26,.5)');gl.addColorStop(1,'rgba(20,22,26,.25)');
+  ctx.fillStyle=gl;ctx.fill();ctx.lineWidth=2;ctx.strokeStyle='rgba(255,255,255,.35)';ctx.stroke();
+  ctx.fillStyle='#cfd3d8';for(const [x,y] of [[-268,-73],[248,-73],[-268,105],[248,105]]){ctx.beginPath();ctx.arc(x,y,11,0,7);ctx.fill();ctx.fillStyle='#7b8189';ctx.beginPath();ctx.arc(x,y,5,0,7);ctx.fill();ctx.fillStyle='#cfd3d8';}
+  // lettering
+  ctx.save();ctx.shadowColor='rgba(0,0,0,.55)';ctx.shadowBlur=14;ctx.shadowOffsetY=6;
+  ctx.textAlign='left';ctx.textBaseline='alphabetic';ctx.fillStyle='#f4f5f7';
+  ctx.font=`700 80px ${FONT}`;ctx.fillText('MAKER',-246,-10);ctx.fillText('SPACE',-246,66);ctx.restore();
+  ctx.font=`600 15px ${FONT}`;ctx.fillStyle='#b8bec6';ctx.textAlign='left';
+  ctx.fillText('DESIGN  ·  BUILD  ·  INNOVATE',-246,92);
+  ctx.fillStyle=BRAND.a;ctx.fillText('FABRICATION LAB',-246,114);
+  ctx.restore();
+}
 let outroNext='menu';
 function showOutro(next){outroNext=next;go('outro');beep(523,.18,'triangle',.05);setTimeout(()=>beep(784,.25,'triangle',.05),180);setTimeout(()=>beep(1046,.4,'triangle',.05),380);}
 function gearOutline(cx,cy,r,n,rot,col,lw){
@@ -2315,13 +2362,7 @@ function drawOutro(t){
   const lw=brandW(120);ctx.save();ctx.translate(0,(1-a1)*30);brand(CX-lw/2,330,120);ctx.restore();
   ctx.globalAlpha=a2;
   txt('p r e s e n t e d   b y',CX,430,30,'#c8ccd2','center',500);
-  if(msOK){
-    const w=600,h=w*msImg.height/msImg.width,x=CX-w/2,y=460+(1-a2)*40;
-    ctx.save();ctx.shadowColor='rgba(207,140,42,.45)';ctx.shadowBlur=50;rr(x,y,w,h,18);ctx.fillStyle='#000';ctx.fill();ctx.restore();
-    ctx.save();rr(x,y,w,h,18);ctx.clip();const k=1+.04*Math.min(1,stateT/9);ctx.drawImage(msImg,x-(w*k-w)/2,y-(h*k-h)/2,w*k,h*k);ctx.restore();
-    rr(x,y,w,h,18);ctx.lineWidth=3;ctx.strokeStyle='rgba(207,140,42,.7)';ctx.stroke();
-    txt('D E S I G N   ·   B U I L D   ·   I N N O V A T E',CX,y+h+46,24,'#c8ccd2','center',600);
-  }else txt('MAKER SPACE',CX,600,90,C.text,'center',700);
+  drawMakerLogo(CX,690+(1-a2)*30,1.15);
   ctx.globalAlpha=1;
   txt('Thanks for playing!',CX,H-30,26,'#7d838c','center',500);
   if(stateT>1.5)rcBtn('outro:next','Continue',W-360,H-140,300,100,true,false);
