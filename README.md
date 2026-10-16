@@ -16,7 +16,7 @@ Open `index.html` on the TV (serve it over https, e.g. GitHub Pages) and pick a 
 - Phone settings (gear icon): auto-gas, invert steering, touch wheel fallback, re-centre.
 
 ## Filament Slice (hand tracking)
-Up to 3 people can play side by side (each with their own score and lives). Swipe both hands (or the mouse) fast through flying filament spools (+10) and circuit boards (+15). Keep a combo going for up to x5.
+One player at a time: the camera follows whoever stands in the middle of its view and ignores friends watching at the sides. Swipe both hands (or the mouse) fast through flying filament spools (+10) and circuit boards (+15). Keep a combo going for up to x5.
 Avoid the red-hot nozzles: each one you slice costs a power cell (3 lives). A shift lasts 75 s.
 
 Files: `index.html` (TV: menu, Maker Run, Circuit Racers), `controller.html` (phone).
