@@ -225,7 +225,7 @@ function onMotion(e){
 function recenter(){center=thS;}
 function tiltSteer(){
   thS+=(th-thS)*.4;
-  const d=thS-center,dead=3,max=30;
+  const d=thS-center,dead=2.5,max=24;
   let s=(Math.abs(d)<dead)?0:(Math.abs(d)-dead)/(max-dead)*Math.sign(d);
   s=clamp(s,-1,1);s=Math.sign(s)*Math.pow(Math.abs(s),1.2);
   return s;

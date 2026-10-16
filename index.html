@@ -63,15 +63,15 @@ import {FilesetResolver, PoseLandmarker, HandLandmarker} from "https://cdn.jsdel
 const CFG = {
   brand1:'SPACE', brand2:'logic', sub:'MAKER SPACE ARCADE',
   model:'lite',            // 'lite' = fast, 'full' = more accurate
-  dwell:1.2,               // seconds to hold the hand cursor on a button
+  dwell:1.0,               // seconds to hold the hand cursor on a button
   roundSeconds:75,         // one shift length
   lives:3,
   // gesture thresholds, as a fraction of the player's own torso length
-  jumpUp:0.26,             // shoulders rise this much  -> jump
-  duckDown:0.30,           // shoulders drop this much  -> squat
-  duckRelease:0.18,
-  leanOn:0.22,             // torso lean (sin of angle) to change lane
-  stepOn:0.9               // or sidestep, in shoulder widths
+  jumpUp:0.17,             // shoulders rise this much  -> jump
+  duckDown:0.20,           // shoulders drop this much  -> squat
+  duckRelease:0.12,
+  leanOn:0.14,             // torso lean (sin of angle) to change lane
+  stepOn:0.55              // or sidestep, in shoulder widths
 };
 const WASM  = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm';
 const MODEL = `https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_${CFG.model}/float16/1/pose_landmarker_${CFG.model}.task`;
@@ -215,7 +215,7 @@ function processPose(lms,t){
   }
   if(best){
     // body-relative mapping: works at any distance from the camera
-    const cx=.5+(best.x-P.sx)/(P.shW*4);
+    const cx=.5+(best.x-P.sx)/(P.shW*3);
     const cy=(best.y-(P.sy-.9*P.torso))/(1.7*P.torso);
     P.cur.x=F.cx.f(cx,t);P.cur.y=F.cy.f(cy,t);P.curOk=cy<1.1;
   }else{P.curOk=false;F.cx.reset();F.cy.reset();}
@@ -276,15 +276,15 @@ function updateUI(dt,t){
   const hb=ptr.on?btnAt(ptr,ptr.src==='pinch'?24:0):null,hid=hb&&state!=='home'?hb.id:null;
   if(hid&&hid!==hoverId)beep(1500,.025,'sine',.025);           // soft tick when the cursor lands on something
   hoverId=hid;
-  if(ptr.src==='pinch'){hov={id:null,t:0};return;}       // pinch clicks instead of hovering
+  if(ptr.src==='pinch'&&!HAND_UI.includes(state)&&state!=='esmenu'&&state!=='esresult'){hov={id:null,t:0};return;}   // in puzzles pinch only
   let h=null;
-  if(ptr.on)for(const b of buttons)if(b.on&&!(b.noHand&&ptr.src==='hand')&&inRect(ptr,b.x,b.y,b.w,b.h)){h=b;break;}
+  if(ptr.on)for(const b of buttons)if(b.on&&!(b.noHand&&ptr.src!=='mouse')&&b.id!=='home:go'&&inRect(ptr,b.x-(ptr.src==='pinch'?40:0),b.y-(ptr.src==='pinch'?40:0),b.w+(ptr.src==='pinch'?80:0),b.h+(ptr.src==='pinch'?80:0))){h=b;break;}
   if(!h||lock>0){hov={id:null,t:0};return;}
   if(hov.id!==h.id)hov={id:h.id,t:0};
   hov.t+=dt;
-  if(hov.t>=CFG.dwell){const id=h.id;hov={id:null,t:0};press(id);}
+  if(hov.t>=(ptr.src==='pinch'?2:CFG.dwell)){const id=h.id;hov={id:null,t:0};press(id);}
 }
-const prog=id=>hov.id===id?clamp(hov.t/CFG.dwell,0,1):0;
+const prog=id=>hov.id===id?clamp(hov.t/(ptr.src==='pinch'?2:CFG.dwell),0,1):0;
 function press(id){
   sfx.select();
   if(id==='game:runner'||id==='again')startFlow();
@@ -351,7 +351,7 @@ function poseInput(){
 }
 function hurt(){
   if(R.inv>0)return;
-  R.lives--;R.inv=1.4;R.shake=.4;R.flash=1;sfx.hit();floatText('Ouch!',CX+R.laneX*330,560,'#f07a6a');
+  R.lives--;R.inv=2;R.shake=.4;R.flash=1;sfx.hit();floatText('Ouch!',CX+R.laneX*330,560,'#f07a6a');
   if(R.lives<=0)endRun('Out of power');
 }
 function endRun(reason){
@@ -369,7 +369,7 @@ function updateRun(dt,t){
   }
   R.duck=R.duckPose||kb.down;
   if(Math.floor((R.t+dt)/20)>Math.floor(R.t/20))showBanner('Speed up!');
-  R.t+=dt;R.speed=14+Math.min(14,R.t*.25);R.pos+=R.speed*dt;R.phase+=dt*R.speed*.55;
+  R.t+=dt;R.speed=12+Math.min(10,R.t*.17);R.pos+=R.speed*dt;R.phase+=dt*R.speed*.55;
   R.laneX=lerp(R.laneX,R.lane,1-Math.exp(-dt*12));
   if(R.jumpT>=0){R.jumpT+=dt;const u=R.jumpT/.78;if(u>=1){R.jumpT=-1;R.h=0;}else R.h=4*u*(1-u);}
   R.duckAmt=lerp(R.duckAmt,R.duck&&R.jumpT<0?1:0,1-Math.exp(-dt*14));
@@ -380,14 +380,14 @@ function updateRun(dt,t){
   }
   for(const it of R.items){
     if(it.done)continue;const d=it.wz-R.pos;if(d>.7||d<-.9)continue;
-    const ov=it.k==='duck'||Math.abs(it.lane-R.laneX)<.62;
+    const ov=it.k==='duck'||Math.abs(it.lane-R.laneX)<.5;
     if(it.k==='gear'){
-      if(Math.abs(it.lane-R.laneX)<.7&&(!it.high||R.h>.35)){it.done=true;R.gears++;sfx.gear();floatText('+25',CX+R.laneX*330,620);}
+      if(Math.abs(it.lane-R.laneX)<.8&&(!it.high||R.h>.25)){it.done=true;R.gears++;sfx.gear();floatText('+25',CX+R.laneX*330,620);}
     }else if(ov){
       let hit=false;
       if(it.k==='block')hit=true;
-      else if(it.k==='jump')hit=R.h<.5;
-      else if(it.k==='duck')hit=R.duckAmt<.6;
+      else if(it.k==='jump')hit=R.h<.35;
+      else if(it.k==='duck')hit=R.duckAmt<.45;
       if(hit){it.done=true;hurt();}
     }
   }
@@ -959,7 +959,7 @@ function rcNewCar(id,slot,human,name,color){
   return{id,slot,human,name,color,z:0,pz:0,x:0,speed:0,nitro:.3,steer:0,gas:0,brake:0,nb:0,boosting:false,crash:0,
     lapN:0,lapStart:0,lapTimes:[],finished:false,finT:0,pos:1,gears:0,bgx:0,ai:null,hitFlash:0,bounce:0};
 }
-function rcMakeAI(c){c.ai={lane:rand(-.6,.6),target:0,pace:rand(.8,.94),nbT:0};}
+function rcMakeAI(c){c.ai={lane:rand(-.6,.6),target:0,pace:rand(.74,.9),nbT:0};}
 function rcStartRace(){
   rcBuildTrack();
   for(const s of NET.slots)if(s&&!s.conn)NET.slots[s.i]=null;
@@ -1050,7 +1050,7 @@ function rcInteract(c){
       if(sp.type==='pylon'||sp.taken[c.id]===lap)continue;
       if(Math.abs(c.x-sp.o)<(sp.type==='crate'?.26:.3)){
         sp.taken[c.id]=lap;
-        if(sp.type==='crate'){c.speed=Math.min(c.speed,RCC.maxSpeed*.22);c.crash=.8;c.hitFlash=.5;c.nitro=Math.max(0,c.nitro-.08);
+        if(sp.type==='crate'){c.speed=Math.min(c.speed,RCC.maxSpeed*.45);c.crash=.8;c.hitFlash=.5;c.nitro=Math.max(0,c.nitro-.08);
           if(c.human){sfx.hit();rcBuzz(c,220);}}
         else{c.gears++;c.nitro=Math.min(1,c.nitro+.22);if(c.human){sfx.gear();rcBuzz(c,25);}}
       }
@@ -1430,7 +1430,7 @@ addEventListener('keyup',e=>{
    Slice filament spools and PCBs, avoid the red-hot nozzles.
    ===================================================================== */
 const FS_STATES=['fscount','fsplay','fsover'];
-const FS={grav:1500,minSpeed:850,hit:14,max:1,detect:3,cols:['#35e0ff']};   // one player; the camera still looks at up to 3 people to find the one in the middle
+const FS={grav:1300,minSpeed:520,hit:34,max:1,detect:3,cols:['#35e0ff']};   // one player; the camera still looks at up to 3 people to find the one in the middle
 const S={t:0,objs:[],frags:[],pops:[],sparks:[],nextWave:.6,flash:0,shake:0,newBest:false,players:[],blades:[]};
 for(let i=0;i<FS.max;i++)for(let k=0;k<2;k++)S.blades.push({pl:i,k,x:0,y:0,px:0,py:0,on:false,pon:false,trail:[],speed:0});
 S.blades.push({pl:0,k:2,x:0,y:0,px:0,py:0,on:false,pon:false,trail:[],speed:0});            // mouse
@@ -1454,7 +1454,7 @@ const fsActive=()=>S.players.filter(p=>p.active);
 
 function fsWave(){
   const n=1+Math.floor(Math.random()*(1+Math.min(3,S.t/20)))+(fsActive().length>1?1:0);
-  const nozP=.1+Math.min(.18,S.t/220);
+  const nozP=.08+Math.min(.12,S.t/300);
   for(let i=0;i<n;i++){
     const r=Math.random(),k=r<nozP?'nozzle':(r<.6?'spool':'pcb'),x=rand(300,W-300);
     S.objs.push({k,x,y:H+90,vx:(W/2-x)*rand(.15,.5)+rand(-150,150),vy:-rand(1500,1850),r:k==='pcb'?80:74,rot:rand(0,6),vr:rand(-4,4),hit:false,seen:false});
@@ -1474,7 +1474,7 @@ function fsTrack(t){
   [[19,15],[20,16]].forEach(([a,b],k)=>{
     const i=V(a)>.4?a:(V(b)>.4?b:-1),F2=fsHandF[0][k];
     if(i<0){F2.x.reset();F2.y.reset();return;}
-    const nx=.5+(X(i)-sx)/(sw*5.2),ny=.5+(Y(i)-sy)/(to*2.8);
+    const nx=.5+(X(i)-sx)/(sw*4),ny=.5+(Y(i)-sy)/(to*2.3);
     pl.hands[k]={x:clamp(F2.x.f(nx,t),-.05,1.05)*W,y:clamp(F2.y.f(ny,t),-.05,1.05)*H};
   });
 }
@@ -1668,10 +1668,10 @@ function fsDraw(t){
    ===================================================================== */
 const ES_STATES=['esmenu','esintro','esplay','esend','esresult'];
 const HAND_MODEL='https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task';
-const ES_DUR=360;                        // seconds per mission
+const ES_DUR=420;                        // seconds per mission
 const RX=60,RY=140,RW=1800,RH=770;       // puzzle room rectangle
 let handLM=null,handLoading=false,visionFS=null;
-const HD={ok:false,x:W/2,y:H/2,pinch:false,d:1,lm:null,seen:-9,fx:new OneEuro(1.4,5),fy:new OneEuro(1.4,5)};
+const HD={ok:false,x:W/2,y:H/2,pinch:false,d:1,lm:null,seen:-9,fx:new OneEuro(1.6,12),fy:new OneEuro(1.6,12),close:0,pinchT:0};
 const EI={x:W/2,y:H/2,on:false,down:false,pressed:false,released:false,src:'none'};
 let mouseDown=false;
 
@@ -1689,17 +1689,20 @@ async function initHands(){
 }
 function processHands(res,t){
   const hs=res&&res.landmarks;
-  if(!hs||!hs.length){HD.ok=false;HD.lm=null;HD.pinch=false;HD.fx.reset();HD.fy.reset();return;}
+  if(!hs||!hs.length){if(t-HD.seen>.35){HD.ok=false;HD.lm=null;HD.pinch=false;HD.fx.reset();HD.fy.reset();}return;}   // ride out short dropouts
   let lm=hs[0],bd=9;
   for(const h of hs){const d=Math.abs(h[9].x-.5);if(d<bd){bd=d;lm=h;}}       // the hand nearest the middle of the view
   HD.lm=lm;HD.ok=true;HD.seen=t;
   const asp=(video.videoWidth/video.videoHeight)||16/9;
   const dd=(a,b)=>Math.hypot((lm[a].x-lm[b].x)*asp,lm[a].y-lm[b].y);
   HD.d=dd(4,8)/Math.max(.02,dd(0,9));                                       // thumb-index gap relative to hand size
-  if(!HD.pinch&&HD.d<.33)HD.pinch=true;else if(HD.pinch&&HD.d>.5)HD.pinch=false;
-  const mx=1-(lm[4].x+lm[8].x)/2,my=(lm[4].y+lm[8].y)/2;                     // pinch point, mirrored
-  HD.x=HD.fx.f(clamp((mx-.22)/.56,0,1),t)*W;                                // the middle of the camera view covers the whole screen
-  HD.y=HD.fy.f(clamp((my-.12)/.6,0,1),t)*H;
+  // forgiving pinch: closes at .42, needs a clear opening (.62) to release, so drags do not drop
+  if(!HD.pinch&&HD.d<.42){HD.pinch=true;HD.pinchT=t;beep(1100,.04,'sine',.035);}else if(HD.pinch&&HD.d>.62)HD.pinch=false;
+  HD.close=clamp((.9-HD.d)/(.9-.42),0,1);
+  // steer with the knuckle (5,9) so the cursor does not jump when the fingers close
+  const mx=1-(lm[5].x+lm[9].x)/2,my=(lm[5].y+lm[9].y)/2;
+  HD.x=HD.fx.f(clamp((mx-.3)/.4,0,1),t)*W;                                  // a small hand movement covers the whole screen
+  HD.y=HD.fy.f(clamp((my-.2)/.45,0,1),t)*H;
 }
 
 /* ---------------- the three missions ---------------- */
@@ -1882,7 +1885,7 @@ function updWires(P){
     for(let k=0;k<4;k++){const p=wR(k);if(Math.hypot(EI.x-p.x,EI.y-p.y)<80){
       if(Object.values(P.conn).includes(k))break;
       if(P.map[P.left[r]]===P.right[k]){P.conn[r]=k;esBurst(p.x,p.y,WCOL[P.left[r]],30,420);beep(660,.08,'square',.05);setTimeout(()=>beep(990,.1,'square',.04),70);}
-      else esPenalty(10,p.x,p.y);
+      else esPenalty(5,p.x,p.y);
       break;}}
   }
   return Object.keys(P.conn).length===4;
@@ -1938,10 +1941,10 @@ function updTune(P,dt){
     if(!EI.down)P.drag=null;
     else{const k=P.drag.k,dv=((P.drag.y0-EI.y)+(EI.x-P.drag.x0)*.6)/320*(k.max-k.min);P[k.key]=clamp(P.drag.v0+dv,k.min,k.max);}
   }
-  const ok=Math.abs(P.f-P.tf)<.18&&Math.abs(P.a-P.ta)<.07;
+  const ok=Math.abs(P.f-P.tf)<.32&&Math.abs(P.a-P.ta)<.11;
   P.lock=ok?P.lock+dt:Math.max(0,P.lock-dt*2);
   if(ok&&Math.random()<dt*8)beep(1200+P.lock*400,.03,'sine',.02);
-  return P.lock>1.4;
+  return P.lock>.9;
 }
 function drawTune(P,t){
   const S0=esS(),x0=360,y0=RY+30,w=1200,h=320,cy=y0+h/2;
@@ -1982,7 +1985,7 @@ function updKeypad(P,dt){
       const k=KEYS[i];if(k==='C')P.entry='';else if(k==='<')P.entry=P.entry.slice(0,-1);else if(P.entry.length<4)P.entry+=k;
       if(P.entry.length===4){
         if(P.entry===ES.code.join('')){P.phase=esS().final==='pump'?'pump':'lever';P.pr=0;esBurst(810,220,C.green,40,500);sfx.gear();}
-        else{P.err=.8;esPenalty(15,810,220);setTimeout(()=>{P.entry='';},350);}
+        else{P.err=.8;esPenalty(8,810,220);setTimeout(()=>{P.entry='';},350);}
       }
       break;}}
   }else if(P.phase==='pump'){
@@ -2174,8 +2177,8 @@ function updMemory(P,dt){
   }
   if(EI.pressed&&EI.on)for(let i=0;i<6;i++){const p=memPos(i);if(Math.hypot(EI.x-p.x,EI.y-p.y)<80){
     P.press=i;P.litT=.3;beep(440+i*90,.2,'sine',.05);
-    if(i===P.seq[P.idx]){P.idx++;if(P.idx>=P.round){if(P.round>=5)return true;P.round+=2;P.phase='show';P.st=-.9;P.lit=-1;esPop('Sequence accepted',C.green);}}
-    else{P.err=.8;esPenalty(10,p.x,p.y);P.phase='show';P.st=-.9;P.lit=-1;}
+    if(i===P.seq[P.idx]){P.idx++;if(P.idx>=P.round){if(P.round>=4)return true;P.round+=1;P.phase='show';P.st=-.9;P.lit=-1;esPop('Sequence accepted',C.green);}}
+    else{P.err=.8;esPenalty(5,p.x,p.y);P.phase='show';P.st=-.9;P.lit=-1;}
     break;}}
   return false;
 }
@@ -2203,9 +2206,9 @@ const patPos=i=>({x:CX-180+(i%3)*180,y:RY+260+Math.floor(i/3)*180});
 function makePattern(){
   for(let k=0;k<100;k++){
     const seq=[Math.floor(Math.random()*9)];
-    while(seq.length<5){const c=seq[seq.length-1],nb=[];for(let j=0;j<9;j++){if(seq.includes(j))continue;if(Math.abs(j%3-c%3)<=1&&Math.abs(Math.floor(j/3)-Math.floor(c/3))<=1)nb.push(j);}
+    while(seq.length<4){const c=seq[seq.length-1],nb=[];for(let j=0;j<9;j++){if(seq.includes(j))continue;if(Math.abs(j%3-c%3)<=1&&Math.abs(Math.floor(j/3)-Math.floor(c/3))<=1)nb.push(j);}
       if(!nb.length)break;seq.push(nb[Math.floor(Math.random()*nb.length)]);}
-    if(seq.length===5)return{type:'pattern',seq,path:[],drawing:false,err:0,glimpse:0};
+    if(seq.length===4)return{type:'pattern',seq,path:[],drawing:false,err:0,glimpse:0};
   }
 }
 function updPattern(P,dt){
@@ -2216,7 +2219,7 @@ function updPattern(P,dt){
     if(EI.down){const i=near();if(i>=0&&!P.path.includes(i)){P.path.push(i);beep(600+P.path.length*80,.04,'sine',.04);}}
     else{P.drawing=false;
       if(P.path.join()===P.seq.join())return true;
-      if(P.path.length>1){P.err=.8;esPenalty(10,CX,RY+440);}P.path=[];}
+      if(P.path.length>1){P.err=.8;esPenalty(5,CX,RY+440);}P.path=[];}
   }
   return false;
 }
@@ -2249,9 +2252,9 @@ function updOverride(P,dt,t){
   if(P.grab&&!EI.down)P.grab=false;
   if(P.grab){P.x=clamp(EI.x,RX+80,RX+RW-80);P.y=clamp(EI.y,RY+180,RY+RH-60);}
   const ex=CX,ey=RY+70,ang=Math.PI/2+Math.sin(t*.9)*1.15,ba=Math.atan2(P.y-ey,P.x-ex);
-  const inBeam=Math.abs(ba-ang)<.09;
-  if(inBeam&&P.hitT<=0){P.charge=Math.max(0,P.charge-.3);P.hitT=1;ES.shake=.3;sfx.hit();esBurst(P.x,P.y,C.red,20,300);}
-  if(P.grab&&!inBeam)P.charge=Math.min(1,P.charge+dt/7);
+  const inBeam=Math.abs(ba-ang)<.07;
+  if(inBeam&&P.hitT<=0){P.charge=Math.max(0,P.charge-.15);P.hitT=1.2;ES.shake=.3;sfx.hit();esBurst(P.x,P.y,C.red,20,300);}
+  if(P.grab&&!inBeam)P.charge=Math.min(1,P.charge+dt/4.5);
   if(P.grab&&Math.random()<dt*6)beep(300+P.charge*900,.03,'sine',.02);
   P.ang=ang;
   return P.charge>=1;
@@ -2282,7 +2285,7 @@ function updValves(P,dt){
     if(v.drag){
       if(!EI.down){v.drag=false;continue;}
       const a=Math.atan2(EI.y-v.y,EI.x-v.x);let d=a-v.last;if(d>Math.PI)d-=Math.PI*2;if(d<-Math.PI)d+=Math.PI*2;v.last=a;
-      if(d>0){v.turn=Math.min(1,v.turn+d/(Math.PI*4));if(Math.random()<.3)beep(180+v.turn*200,.04,'sawtooth',.02);}
+      if(Math.abs(d)>.01){v.turn=Math.min(1,v.turn+Math.abs(d)/(Math.PI*2.5));if(Math.random()<.3)beep(180+v.turn*200,.04,'sawtooth',.02);}
       if(v.turn>=1){v.drag=false;esBurst(v.x,v.y,esS().col,30,420);sfx.gear();}
     }
   }
@@ -2290,13 +2293,13 @@ function updValves(P,dt){
 }
 function drawValves(P,t){
   const S0=esS();
-  txt('CLOSE THE LEAKS  ·  pinch a wheel and turn it clockwise, two full turns',CX,RY+80,24,S0.col,'center',700);
+  txt('CLOSE THE LEAKS  ·  pinch a wheel and circle your hand around it',CX,RY+80,24,S0.col,'center',700);
   for(const v of P.v){
     const done=v.turn>=1;
     ctx.strokeStyle='#33415e';ctx.lineWidth=60;ctx.beginPath();ctx.moveTo(v.x,v.y+60);ctx.lineTo(v.x,RY+RH-20);ctx.stroke();
     if(!done){for(let k=0;k<8;k++){const a=-Math.PI/2+rand(-.6,.6),l=rand(60,200)*(1-v.turn);ctx.strokeStyle='rgba(150,230,255,.5)';ctx.lineWidth=rand(2,5);
       ctx.beginPath();ctx.moveTo(v.x+70,v.y-40);ctx.lineTo(v.x+70+Math.cos(a+.8)*l,v.y-40+Math.sin(a+.8)*l);ctx.stroke();}}
-    ctx.save();ctx.translate(v.x,v.y);ctx.rotate(v.turn*Math.PI*4);
+    ctx.save();ctx.translate(v.x,v.y);ctx.rotate(v.turn*Math.PI*2.5);
     ctx.shadowColor=done?C.green:S0.acc;ctx.shadowBlur=v.drag?40:16;ctx.strokeStyle=done?C.green:'#d9a441';ctx.lineWidth=20;
     ctx.beginPath();ctx.arc(0,0,120,0,7);ctx.stroke();
     ctx.lineWidth=14;for(let k=0;k<4;k++){const a=k*Math.PI/2;ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(Math.cos(a)*120,Math.sin(a)*120);ctx.stroke();}
@@ -2355,7 +2358,7 @@ function bodyLean(){
   if(t-mouse.t<2||!camMode())return clamp((mouse.x-CX)/500,-1.5,1.5);
   if(!tracked(t))return 0;
   const asp=(video.videoWidth/video.videoHeight)||16/9;
-  return clamp(P.hasHips?P.lean/.22:(P.sx-asp/2)/(P.shW*1.5),-1.5,1.5);
+  return clamp(P.hasHips?P.lean/.13:(P.sx-asp/2)/(P.shW*1.1),-1.5,1.5);
 }
 function drawStick(cx,cy,s,pose,col,lw=10,alpha=1){        // simple figure: Y, T, L (your left arm up), R
   ctx.save();ctx.globalAlpha=alpha;ctx.strokeStyle=col;ctx.lineWidth=lw;ctx.lineCap='round';
@@ -2386,31 +2389,31 @@ function makeBalance(){return{type:'balance',g:.7,wind:-.5,wT:0,prog:0,L:0};}
 function updBalance(Q,dt){
   Q.wT-=dt;if(Q.wT<=0){Q.wT=rand(1.6,3);Q.wind=rand(.35,.75)*(Math.random()<.5?-1:1);}
   Q.L+=(bodyLean()-Q.L)*Math.min(1,dt*8);
-  Q.g=clamp(Q.g+(Q.wind*.55+Q.L*.9)*dt,-1,1);
-  const ok=Math.abs(Q.g)<.25;Q.prog=ok?Q.prog+dt:Math.max(0,Q.prog-dt*.6);
+  Q.g=clamp(Q.g+(Q.wind*.35+Q.L*1.1)*dt,-1,1);
+  const ok=Math.abs(Q.g)<.38;Q.prog=ok?Q.prog+dt:Math.max(0,Q.prog-dt*.6);
   if(ok&&Math.random()<dt*5)beep(900+Q.prog*120,.04,'sine',.02);
-  return Q.prog>=5;
+  return Q.prog>=3.5;
 }
 function drawBalance(Q,t){
   const S0=esS(),cx=CX,cy=RY+430;
   txt('STABILISE THE SPIN  ·  lean your whole body left or right',CX,RY+56,24,S0.col,'center',700);
   ctx.save();ctx.translate(cx,cy);
   ctx.strokeStyle='rgba(255,255,255,.08)';ctx.lineWidth=40;ctx.beginPath();ctx.arc(0,0,250,Math.PI*1.1,Math.PI*1.9);ctx.stroke();
-  ctx.strokeStyle='rgba(77,255,154,.45)';ctx.beginPath();ctx.arc(0,0,250,Math.PI*1.5-.25*.4*Math.PI,Math.PI*1.5+.25*.4*Math.PI);ctx.stroke();
+  ctx.strokeStyle='rgba(77,255,154,.45)';ctx.beginPath();ctx.arc(0,0,250,Math.PI*1.5-.38*.4*Math.PI,Math.PI*1.5+.38*.4*Math.PI);ctx.stroke();
   ctx.rotate(Q.g*.7);
   for(let i=0;i<3;i++){ctx.strokeStyle=i===1?S0.acc:S0.col;ctx.lineWidth=6;ctx.beginPath();ctx.ellipse(0,0,190-i*50,(190-i*50)*(.35+.2*Math.sin(t*2+i)),0,0,7);ctx.stroke();}
   ctx.fillStyle='#24324d';ctx.fillRect(-160,-14,320,28);ctx.fillStyle=S0.col;ctx.beginPath();ctx.arc(0,0,40,0,7);ctx.fill();
   ctx.restore();
   const na=Math.PI*1.5+Q.g*.4*Math.PI;
-  ctx.save();ctx.strokeStyle=Math.abs(Q.g)<.25?C.green:C.red;ctx.lineWidth=8;ctx.lineCap='round';ctx.shadowColor=ctx.strokeStyle;ctx.shadowBlur=20;
+  ctx.save();ctx.strokeStyle=Math.abs(Q.g)<.38?C.green:C.red;ctx.lineWidth=8;ctx.lineCap='round';ctx.shadowColor=ctx.strokeStyle;ctx.shadowBlur=20;
   ctx.beginPath();ctx.moveTo(cx+Math.cos(na)*200,cy+Math.sin(na)*200);ctx.lineTo(cx+Math.cos(na)*300,cy+Math.sin(na)*300);ctx.stroke();ctx.restore();
   // your lean
   ctx.save();ctx.translate(320,RY+470);ctx.rotate(Q.L*.35);drawStick(0,0,180,'',S0.col,10);ctx.restore();
   txt('YOU',320,RY+680,20,S0.col,'center',700);
   txt(Q.L<-.2?'◀ leaning left':Q.L>.2?'leaning right ▶':'standing straight',320,RY+715,20,C.dim,'center',600);
   ctx.strokeStyle='rgba(255,255,255,.12)';ctx.lineWidth=14;ctx.beginPath();ctx.arc(1600,RY+600,90,0,7);ctx.stroke();
-  ctx.strokeStyle=C.green;ctx.beginPath();ctx.arc(1600,RY+600,90,-Math.PI/2,-Math.PI/2+Math.PI*2*Q.prog/5);ctx.stroke();
-  txt(Math.ceil(5-Q.prog)+' s',1600,RY+614,40,C.text,'center',700);txt('HOLD IN GREEN',1600,RY+730,18,C.green,'center',700);
+  ctx.strokeStyle=C.green;ctx.beginPath();ctx.arc(1600,RY+600,90,-Math.PI/2,-Math.PI/2+Math.PI*2*Q.prog/3.5);ctx.stroke();
+  txt(Math.ceil(3.5-Q.prog)+' s',1600,RY+614,40,C.text,'center',700);txt('HOLD IN GREEN',1600,RY+730,18,C.green,'center',700);
   const hint=bodyHint(performance.now()/1000);if(hint)txt(hint,CX,RY+RH-24,24,C.orange,'center',600);
 }
 
@@ -2420,19 +2423,19 @@ function poseNow(){
   const t=performance.now()/1000;if(!tracked(t)||!P.lm)return null;
   const lm=P.lm,asp=(video.videoWidth/video.videoHeight)||16/9,X=i=>(1-lm[i].x)*asp,Y=i=>lm[i].y,V=i=>lm[i].visibility??1;
   const tor=P.torso,sh=P.shW;
-  const up=i=>V(i)>.4&&Y(i)<Y(0)-.02;
-  const out=(w,s,dir)=>V(w)>.4&&Math.abs(Y(w)-Y(s))<.45*tor&&(X(w)-X(s))*dir>.8*sh;
+  const up=i=>V(i)>.3&&Y(i)<P.sy-.35*tor;                    // wrist clearly above the shoulders
+  const out=(w,s,dir)=>V(w)>.3&&Math.abs(Y(w)-Y(s))<.6*tor&&(X(w)-X(s))*dir>.55*sh;
   const lU=up(15),rU=up(16),lO=out(15,11,-1),rO=out(16,12,1);
   if(lU&&rU)return'Y';if(lO&&rO)return'T';if(lU&&!rU)return'L';if(rU&&!lU)return'R';return null;
 }
-function makeBodyScan(){return{type:'bodyscan',list:shuffle(['Y','T','L','R']).slice(0,3),i:0,hold:0,cur:null,flash:0};}
+function makeBodyScan(){return{type:'bodyscan',list:shuffle(['Y','T','L','R']).slice(0,2),i:0,hold:0,cur:null,flash:0};}
 function updBodyScan(Q,dt){
   Q.flash=Math.max(0,Q.flash-dt);
   const want=Q.list[Q.i];let cur=poseNow();
   if(EI.pressed&&EI.src==='mouse'){cur=want;Q.hold=1;}
   Q.cur=cur;Q.hold=cur===want?Q.hold+dt:Math.max(0,Q.hold-dt*2);
   if(cur===want&&Math.random()<dt*6)beep(700+Q.hold*500,.03,'sine',.02);
-  if(Q.hold>=1){Q.i++;Q.hold=0;Q.flash=.6;sfx.gear();esBurst(CX,RY+430,esS().acc,30,500);if(Q.i>=Q.list.length)return true;}
+  if(Q.hold>=.6){Q.i++;Q.hold=0;Q.flash=.6;sfx.gear();esBurst(CX,RY+430,esS().acc,30,500);if(Q.i>=Q.list.length)return true;}
   return false;
 }
 function drawBodyScan(Q,t){
@@ -2447,7 +2450,7 @@ function drawBodyScan(Q,t){
   drawStick(cx,cy,180,want,ok?C.green:'rgba(200,107,255,.55)',22,.6);
   drawLiveSkeleton(cx,cy-99,150,ok?C.green:S0.acc);
   txt(POSE_NAME[want],cx,RY+730,34,ok?C.green:C.text,'center',700);
-  rr(cx-260,RY+748,520,12,6);ctx.fillStyle='rgba(255,255,255,.1)';ctx.fill();rr(cx-260,RY+748,520*clamp(Q.hold,0,1),12,6);ctx.fillStyle=C.green;ctx.fill();
+  rr(cx-260,RY+748,520,12,6);ctx.fillStyle='rgba(255,255,255,.1)';ctx.fill();rr(cx-260,RY+748,520*clamp(Q.hold/.6,0,1),12,6);ctx.fillStyle=C.green;ctx.fill();
   const hint=bodyHint(performance.now()/1000);if(hint)txt(hint+(camMode()?'':'  (click to match)'),CX,RY+238,20,C.orange,'center',600);
   if(Q.flash>0){ctx.fillStyle=`rgba(77,255,154,${Q.flash*.25})`;ctx.fillRect(RX,RY,RW,RH);}
 }
@@ -2455,15 +2458,15 @@ function drawBodyScan(Q,t){
 /* ABYSS: swim to the airlock with big arm strokes */
 function makeSwim(){return{type:'swim',prog:0,st:'down',strokes:0,kick:0,bub:[]};}
 function updSwim(Q,dt){
-  Q.kick=Math.max(0,Q.kick-dt*2);Q.prog=Math.max(0,Q.prog-dt*.015);
+  Q.kick=Math.max(0,Q.kick-dt*2);Q.prog=Math.max(0,Q.prog-dt*.006);
   let stroke=false;const t=performance.now()/1000;
   if(tracked(t)&&P.lm){
     const lm=P.lm,wy=Math.min(lm[15].y,lm[16].y),wl=Math.max(lm[15].y,lm[16].y),sy=(lm[11].y+lm[12].y)/2;
-    if(Q.st==='down'&&wy<lm[0].y)Q.st='up';
-    else if(Q.st==='up'&&wl>sy+.25*P.torso&&wy>sy){Q.st='down';stroke=true;}
+    if(Q.st==='down'&&wy<sy-.25*P.torso)Q.st='up';                          // a hand above the shoulders
+    else if(Q.st==='up'&&wy>sy+.1*P.torso){Q.st='down';stroke=true;}            // then both hands back below them
   }
   if(EI.pressed&&EI.src==='mouse')stroke=true;
-  if(stroke){Q.strokes++;Q.prog=Math.min(1,Q.prog+.12);Q.kick=1;beep(220,.2,'sine',.05);
+  if(stroke){Q.strokes++;Q.prog=Math.min(1,Q.prog+.18);Q.kick=1;beep(220,.2,'sine',.05);
     for(let i=0;i<14;i++)Q.bub.push({x:260+Q.prog*1300+rand(-40,0),y:RY+330+rand(-30,30),vy:-rand(60,160),r:rand(3,9),l:1.4});}
   for(const b of Q.bub){b.y+=b.vy*dt;b.l-=dt;}Q.bub=Q.bub.filter(b=>b.l>0);
   return Q.prog>=1;
@@ -2576,7 +2579,8 @@ function esHandView(x,y,w,h){
     for(const i of [4,8]){const p=pt(i);ctx.fillStyle=HD.pinch?C.green:C.orange;ctx.beginPath();ctx.arc(p[0],p[1],5,0,7);ctx.fill();}
   }
   ctx.restore();rr(x,y,w,h,14);ctx.lineWidth=2;ctx.strokeStyle=HD.ok?(HD.pinch?C.green:esS().col):'#2b3d5c';ctx.stroke();
-  const s=!camOK?'Mouse mode':handLoading?'Loading hands…':HD.ok?(HD.pinch?'PINCH':'Hand found'):'Show your hand';
+  const s=!camOK?'Mouse mode':handLoading?'Loading hands…':HD.ok?(HD.pinch?'PINCHING':'Open hand'):'Show your hand';
+  if(HD.ok){rr(x+w-34,y+10,24,h-20,12);ctx.fillStyle='rgba(255,255,255,.1)';ctx.fill();const hh=(h-20)*HD.close;rr(x+w-34,y+h-10-hh,24,hh,12);ctx.fillStyle=HD.pinch?C.green:esS().col;ctx.fill();}
   txt(s,x+10,y+h-10,16,HD.ok?C.green:C.dim,'left',700);
 }
 function esHUD(t){
@@ -2816,13 +2820,15 @@ const ripples=[];let fadeT=0,hoverId=null,lastActive=0;
 function uiInput(t,dt){
   const prev=EI.down,handOn=HD.ok&&t-HD.seen<.5;
   if(mouseDown||t-mouse.t<3){EI.x=mouse.x;EI.y=mouse.y;EI.on=true;EI.down=mouseDown;EI.src='mouse';}
-  else if(handOn){EI.x=HD.x;EI.y=HD.y;EI.on=true;EI.down=HD.pinch;EI.src='hand';}
+  else if(handOn){EI.x=HD.x;EI.y=HD.y;EI.on=true;EI.down=HD.pinch;EI.src='hand';
+    if(!ES_STATES.includes(state)||state==='esmenu'||state==='esresult'){const b=btnAt(EI,40);
+      if(b&&b.w<W-10){const cx=b.x+b.w/2,cy=b.y+b.h/2;EI.x+=(cx-EI.x)*.35;EI.y+=(cy-EI.y)*.35;}}}   // gentle magnet to buttons
   else{EI.on=false;EI.down=false;EI.src='none';}
   EI.pressed=EI.down&&!prev;EI.released=!EI.down&&prev;
   if(EI.pressed&&EI.on)ripples.push({x:EI.x,y:EI.y,t:0});
   for(const r of ripples)r.t+=dt;while(ripples.length&&ripples[0].t>.6)ripples.shift();
   if(EI.pressed&&EI.src==='hand'&&lock<=0){
-    const b=btnAt(EI,24);
+    const b=btnAt(EI,40);
     if(b){press(b.id);EI.pressed=false;}
     else if(state==='home'){press('home:go');EI.pressed=false;}
   }
@@ -2892,7 +2898,7 @@ function drawHome(t){
 const GAME_META={
   runner:{cat:'FULL BODY',meta:'1 player  ·  75 seconds',blurb:'Lean, jump and duck through the workshop. Grab every gear you can.'},
   racer:{cat:'PHONE AS STEERING WHEEL',meta:'1 to 4 players  ·  3 laps',blurb:'Scan the QR code and steer with your phone. Race friends and CPU cars.'},
-  escape:{cat:'HAND GESTURES',meta:'1 player  ·  5 minutes',blurb:'Pick a mission, find the clues and crack the code before time runs out.'},
+  escape:{cat:'HAND GESTURES',meta:'1 player  ·  7 minutes',blurb:'Pick a mission, find the clues and crack the code before time runs out.'},
   slice:{cat:'FULL BODY',meta:'1 player  ·  75 seconds',blurb:'Slice flying spools and circuit boards. Stay clear of the hot nozzles.'}};
 const cardHv=[0,0,0,0];let menuLastT=0;
 function drawMenu(t){
@@ -2977,8 +2983,25 @@ let curR=30;
 function drawRipples(){
   for(const r of ripples){ctx.save();ctx.globalAlpha=1-r.t/.6;ctx.strokeStyle=UI.goldL;ctx.lineWidth=3;ctx.beginPath();ctx.arc(r.x,r.y,24+r.t*120,0,7);ctx.stroke();ctx.restore();}
 }
+function pinchCursor(x,y,col){                           // two arcs close together as the fingers close; solid + label when pinched
+  const t=performance.now()/1000,c=HD.close,down=EI.down,r=46-20*c;
+  ctx.save();ctx.lineCap='round';
+  ctx.fillStyle='rgba(7,9,13,.35)';ctx.beginPath();ctx.arc(x,y,50,0,7);ctx.fill();
+  ctx.lineWidth=6;ctx.strokeStyle='rgba(255,255,255,.18)';ctx.beginPath();ctx.arc(x,y,50,0,7);ctx.stroke();
+  ctx.strokeStyle=down?'#7dffb5':col;ctx.shadowColor=ctx.strokeStyle;ctx.shadowBlur=down?30:14;ctx.lineWidth=down?8:6;
+  const gap=(1-c)*1.1;
+  ctx.beginPath();ctx.arc(x,y,r,-Math.PI/2+gap,Math.PI/2-gap);ctx.stroke();
+  ctx.beginPath();ctx.arc(x,y,r,Math.PI/2+gap,Math.PI*1.5-gap);ctx.stroke();
+  ctx.fillStyle=down?'#7dffb5':'#fff';ctx.beginPath();ctx.arc(x,y,down?12:6,0,7);ctx.fill();
+  ctx.restore();
+  if(down&&t-HD.pinchT<.6){ctx.globalAlpha=1-(t-HD.pinchT)/.6;utxt('PINCH',x,y-66,18,'#7dffb5','center',800,4);ctx.globalAlpha=1;}
+  else if(!down&&c>.35)utxt('closer…',x,y-66,15,col,'center',700,2);
+}
 function drawCursor(){
   if(esBody()&&ptr.src!=='mouse'){drawRipples();return;}
+  if(EI.on&&EI.src==='hand'){pinchCursor(EI.x,EI.y,ES_STATES.includes(state)?esS().col:UI.goldL);
+    if(hov.id){ctx.lineWidth=5;ctx.strokeStyle=UI.gold;ctx.beginPath();ctx.arc(EI.x,EI.y,58,-Math.PI/2,-Math.PI/2+Math.PI*2*prog(hov.id));ctx.stroke();}
+    drawRipples();return;}
   if(ES_STATES.includes(state)&&EI.on){esCursor();drawRipples();return;}
   if(!ptr.on){drawRipples();return;}
   const {x,y}=ptr,down=ptr.src==='pinch'&&EI.down,hv=!!hoverId;
