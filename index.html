@@ -169,7 +169,7 @@ async function initModel(){
 let lastVT=-1,detN=0;
 function detect(now){
   if(!camOK||video.readyState<2||video.currentTime===lastVT)return;
-  let hands=handLM&&(ES_STATES.includes(state)||HAND_UI.includes(state));   // menus and Escape Protocol track fingers
+  let hands=handLM&&(ES_STATES.includes(state)||HAND_UI.includes(state))&&!esBody();   // menus and Escape Protocol track fingers; body puzzles track the body
   // on menu screens, keep checking the body every other frame until a hand shows up, so pointing still works
   if(hands&&landmarker&&!ES_STATES.includes(state)&&now/1000-HD.seen>1.5&&(detN++%2))hands=false;
   if(!hands&&!landmarker)return;
@@ -351,7 +351,7 @@ function poseInput(){
 }
 function hurt(){
   if(R.inv>0)return;
-  R.lives--;R.inv=1.4;R.shake=.4;R.flash=1;sfx.hit();
+  R.lives--;R.inv=1.4;R.shake=.4;R.flash=1;sfx.hit();floatText('Ouch!',CX+R.laneX*330,560,'#f07a6a');
   if(R.lives<=0)endRun('Out of power');
 }
 function endRun(reason){
@@ -368,6 +368,7 @@ function updateRun(dt,t){
     R.lostT=0;poseInput();
   }
   R.duck=R.duckPose||kb.down;
+  if(Math.floor((R.t+dt)/20)>Math.floor(R.t/20))showBanner('Speed up!');
   R.t+=dt;R.speed=14+Math.min(14,R.t*.25);R.pos+=R.speed*dt;R.phase+=dt*R.speed*.55;
   R.laneX=lerp(R.laneX,R.lane,1-Math.exp(-dt*12));
   if(R.jumpT>=0){R.jumpT+=dt;const u=R.jumpT/.78;if(u>=1){R.jumpT=-1;R.h=0;}else R.h=4*u*(1-u);}
@@ -381,7 +382,7 @@ function updateRun(dt,t){
     if(it.done)continue;const d=it.wz-R.pos;if(d>.7||d<-.9)continue;
     const ov=it.k==='duck'||Math.abs(it.lane-R.laneX)<.62;
     if(it.k==='gear'){
-      if(Math.abs(it.lane-R.laneX)<.7&&(!it.high||R.h>.35)){it.done=true;R.gears++;sfx.gear();}
+      if(Math.abs(it.lane-R.laneX)<.7&&(!it.high||R.h>.35)){it.done=true;R.gears++;sfx.gear();floatText('+25',CX+R.laneX*330,620);}
     }else if(ov){
       let hit=false;
       if(it.k==='block')hit=true;
@@ -662,33 +663,58 @@ function drawWorld(t){
   }
   if(!playerDrawn)drawPlayer();
 }
+/* shared in-game chrome: glass panels, countdown, floating points, banners */
+function glass(x,y,w,h,r=20,a=.8){rr(x,y,w,h,r);ctx.fillStyle=`rgba(10,12,18,${a})`;ctx.fill();ctx.lineWidth=1.5;ctx.strokeStyle='rgba(235,189,110,.3)';ctx.stroke();}
+function countdownFX(lines){
+  const n=3-Math.floor(stateT),f=stateT%1,cy=440;
+  ctx.fillStyle='rgba(7,9,13,.6)';ctx.fillRect(0,0,W,H);
+  ctx.strokeStyle='rgba(255,255,255,.1)';ctx.lineWidth=6;ctx.beginPath();ctx.arc(CX,cy,170,0,7);ctx.stroke();
+  if(n>0){ctx.save();ctx.strokeStyle=UI.goldL;ctx.shadowColor=UI.gold;ctx.shadowBlur=24;ctx.lineWidth=6;ctx.beginPath();ctx.arc(CX,cy,170,-Math.PI/2,-Math.PI/2+Math.PI*2*(1-f));ctx.stroke();ctx.restore();}
+  const sc=1+.25*(1-Math.min(1,f*4));
+  ctx.save();ctx.translate(CX,cy);ctx.scale(sc,sc);utxt(n>0?String(n):'GO',0,n>0?92:48,n>0?250:140,n>0?UI.ivory:UI.goldL,'center',300);ctx.restore();
+  lines.forEach(([s,c],i)=>utxt(s,CX,700+i*50,i?24:32,c||UI.ivory,'center',i?500:600,i?1:0));
+}
+const floaters=[];let banner=null;
+function floatText(s,x,y,col){floaters.push({s,x,y,col:col||UI.goldL,t0:performance.now()/1000});}
+function showBanner(s){banner={s,t0:performance.now()/1000};}
+function drawFloaters(){
+  const now=performance.now()/1000;
+  for(let i=floaters.length-1;i>=0;i--){const f=floaters[i],a=now-f.t0;if(a>1.1){floaters.splice(i,1);continue;}
+    ctx.globalAlpha=clamp(1.3-a*1.2,0,1);utxt(f.s,f.x,f.y-a*90,44,f.col,'center',700);}
+  ctx.globalAlpha=1;
+  if(banner){const a=now-banner.t0;if(a>1.8)banner=null;else{
+    const al=clamp(Math.min(a*5,(1.8-a)*4),0,1),sc=1+.15*Math.max(0,1-a*4);
+    ctx.save();ctx.globalAlpha=al;ctx.translate(CX,300);ctx.scale(sc,sc);ctx.font=`700 54px ${FONT_UI}`;const w=ctx.measureText(banner.s).width+120;
+    pill(-w/2,-58,w,84,'rgba(255,232,190,.8)','rgba(20,16,10,.82)');utxt(banner.s,0,0,48,UI.goldL,'center',700,2);ctx.restore();}}
+}
 function hudPanel(x,y,w,h){rr(x,y,w,h,18);ctx.fillStyle='rgba(5,11,22,.94)';ctx.fill();ctx.lineWidth=2;ctx.strokeStyle='rgba(53,224,255,.35)';ctx.stroke();}
 function drawHUD(t){
-  hudPanel(30,24,290,200);hudPanel(CX-320,22,640,100);hudPanel(W-440,24,410,118);
-  txt('Score',60,66,26,C.dim,'left',500);txt(String(R.score),60,128,70,C.text,'left',700);
-  gear(76,178,22,t*2,C.yellow);txt(String(R.gears),112,190,40,C.yellow,'left',700);
-  const rem=Math.max(0,CFG.roundSeconds-R.t),bw=560;
-  rr(CX-bw/2,36,bw,22,11);ctx.fillStyle='rgba(255,255,255,.12)';ctx.fill();
-  rr(CX-bw/2,36,Math.max(22,bw*rem/CFG.roundSeconds),22,11);ctx.fillStyle=rem<12?C.red:C.cyan;ctx.fill();
-  txt('Shift ends in '+Math.ceil(rem)+'s',CX,96,28,C.text,'center',600);
-  txt('Power',W-60,66,26,C.dim,'right',500);
-  for(let i=0;i<CFG.lives;i++){
-    const x=W-60-(CFG.lives-i)*92,on=i<R.lives;
-    rr(x,82,76,38,8);ctx.lineWidth=4;ctx.strokeStyle=on?C.green:'#34455f';ctx.stroke();
-    if(on){rr(x+6,88,64,26,4);ctx.fillStyle=C.green;ctx.fill();}
-    ctx.fillStyle=on?C.green:'#34455f';ctx.fillRect(x+76,92,8,18);
-  }
-  drawCam(40,H-250,350,197);
-  if(exitHold>.1){rr(CX-260,H-70,520,16,8);ctx.fillStyle='rgba(255,255,255,.15)';ctx.fill();
-    rr(CX-260,H-70,520*clamp(exitHold/1.5,0,1),16,8);ctx.fillStyle=C.orange;ctx.fill();
-    txt('Keep both hands up to leave',CX,H-84,26,C.orange,'center',600);}
+  glass(30,24,330,150,22);
+  utxt('SCORE',60,64,14,UI.mute,'left',700,5);utxt(String(R.score),58,140,72,UI.ivory,'left',300);
+  gear(300,64,18,t*2,UI.goldL);utxt(String(R.gears),268,72,22,UI.goldL,'right',700);
+  const rem=Math.max(0,CFG.roundSeconds-R.t),bw=260;           // timer sits under the power cells so the neon sign stays clear
+  glass(W-350,146,320,78,22);
+  utxt('SHIFT',W-320,182,13,UI.mute,'left',700,5);utxt(Math.ceil(rem)+' s',W-60,184,24,rem<12?'#f07a6a':UI.ivory,'right',700);
+  rr(W-320,198,bw,6,3);ctx.fillStyle='rgba(255,255,255,.1)';ctx.fill();
+  rr(W-320,198,Math.max(6,bw*rem/CFG.roundSeconds),6,3);ctx.fillStyle=rem<12?'#f07a6a':UI.goldL;ctx.fill();
+  glass(W-350,24,320,110,22);
+  utxt('POWER',W-320,64,14,UI.mute,'left',700,5);
+  for(let i=0;i<CFG.lives;i++){const x=W-320+i*94,on=i<R.lives;
+    rr(x,80,80,30,15);ctx.fillStyle=on?'rgba(77,255,154,.85)':'rgba(255,255,255,.08)';ctx.fill();
+    if(on&&R.inv>0&&i===R.lives-1){ctx.globalAlpha=.5+.5*Math.sin(t*30);ctx.fill();ctx.globalAlpha=1;}}
+  drawCam(40,H-180,240,135,false);
+  drawFloaters();
+  if(exitHold>.1){rr(CX-260,H-70,520,10,5);ctx.fillStyle='rgba(255,255,255,.15)';ctx.fill();
+    rr(CX-260,H-70,520*clamp(exitHold/1.5,0,1),10,5);ctx.fillStyle=UI.goldL;ctx.fill();
+    utxt('Keep both hands up to leave',CX,H-84,22,UI.goldL,'center',600);}
 }
 function controlsHint(){
-  const items=[['◀  ▶','Lean to change lane'],['▲','Jump the toolboxes'],['▼','Squat under the lasers']];
+  const items=[['← →','LEAN','to change lane'],['↑','JUMP','over toolboxes'],['↓','SQUAT','under the lasers']];
   items.forEach((it,i)=>{
-    const x=CX-690+i*470;rr(x,H-190,430,110,18);ctx.fillStyle='rgba(7,16,34,.82)';ctx.fill();
-    ctx.strokeStyle=C.cyan;ctx.lineWidth=3;ctx.stroke();
-    txt(it[0],x+30,H-114,44,C.orange,'left',700);txt(it[1],x+150,H-122,26,C.text,'left',600);
+    const x=CX-675+i*460;glass(x,H-178,430,96,48,.82);
+    ctx.fillStyle='rgba(207,140,42,.18)';ctx.beginPath();ctx.arc(x+52,H-130,32,0,7);ctx.fill();
+    utxt(it[0],x+52,H-120,26,UI.goldL,'center',700);
+    utxt(it[1],x+104,H-136,15,UI.goldL,'left',700,5);utxt(it[2],x+104,H-106,24,UI.ivory,'left',500);
   });
 }
 function drawScene(t){
@@ -701,16 +727,19 @@ function drawScene(t){
 }
 function drawCalib(t){
   bgSpace(t);
-  txt('Get ready',CX,120,72,C.cyan,'center',700);
-  txt('Stand in the dashed zone with shoulders to hips in view, then hold still.',CX,176,32,C.text,'center',500);
-  const asp=video.videoWidth/video.videoHeight||16/9,w=1000,h=w/asp,x=(W-w)/2,y=230;
+  utxt('MAKER RUN',CX,96,16,UI.goldL,'center',700,8);
+  utxt('Get into position',CX,160,52,UI.ivory,'center',600);
+  utxt('Stand inside the gold frame so your shoulders and hips are visible, then hold still',CX,204,22,UI.mute,'center',500,1);
+  const asp=video.videoWidth/video.videoHeight||16/9,w=880,h=w/asp,x=(W-w)/2,y=240;
+  ctx.save();ctx.shadowColor='rgba(0,0,0,.6)';ctx.shadowBlur=60;rr(x,y,w,h,24);ctx.fillStyle='#000';ctx.fill();ctx.restore();
   drawCam(x,y,w,h,false);
-  ctx.save();ctx.setLineDash([18,14]);ctx.strokeStyle=C.orange;ctx.lineWidth=5;
-  ctx.strokeRect(x+w*.3,y+h*.06,w*.4,h*.88);ctx.restore();
-  txt(cal.msg||'Step into the frame',CX,y+h+80,52,cal.ok?C.green:C.orange,'center',700);
-  rr(CX-300,y+h+110,600,18,9);ctx.fillStyle='rgba(255,255,255,.12)';ctx.fill();
-  if(cal.prog>0){rr(CX-300,y+h+110,600*cal.prog,18,9);ctx.fillStyle=C.green;ctx.fill();}
-  txt('Hold both hands above your head for 1.5 s to leave',CX,H-40,24,C.dim,'center',500);
+  ctx.save();ctx.setLineDash([16,12]);ctx.strokeStyle=UI.goldL;ctx.lineWidth=3;ctx.strokeRect(x+w*.3,y+h*.06,w*.4,h*.88);ctx.restore();
+  const msg=cal.msg||'Step into the frame';ctx.font=`600 28px ${FONT_UI}`;const pw=ctx.measureText(msg).width+80;
+  pill(CX-pw/2,y+h+30,pw,60,cal.ok?'rgba(77,255,154,.7)':'rgba(235,189,110,.6)','rgba(14,16,22,.85)');
+  utxt(msg,CX,y+h+70,28,cal.ok?'#7dffb5':UI.goldL,'center',600);
+  rr(CX-260,y+h+112,520,8,4);ctx.fillStyle='rgba(255,255,255,.1)';ctx.fill();
+  if(cal.prog>0){rr(CX-260,y+h+112,520*cal.prog,8,4);ctx.fillStyle='#7dffb5';ctx.fill();}
+  utxt('Hold both hands above your head to leave',CX,H-40,18,UI.faint,'center',600,2);
 }
 /* one results layout for every game: a glass card with the result, best scores and big pinch buttons */
 function resultCard(o,t){
@@ -1305,56 +1334,50 @@ function rcDrawRace(t){
 /* ---------------- drawing: lobby + results ---------------- */
 function rcDrawLobby(t){
   bgSpace(t);
-  ctx.font=`700 92px ${FONT}`;const cw0=ctx.measureText('CIRCUIT ').width;
-  txt('CIRCUIT',70,118,92,C.text,'left',700);txt('RACERS',70+cw0,118,92,C.cyan,'left',700);
-  txt('Your phone is the steering wheel',72,172,32,C.orange,'left',600);
+  utxt('PHONE  AS  STEERING  WHEEL',80,96,15,UI.goldL,'left',700,7);
+  utxt('Circuit Racers',78,168,66,UI.ivory,'left',700);
   // QR card
-  const qx=70,qy=215,qs=480;
-  rr(qx-14,qy-14,qs+28,qs+28,26);ctx.fillStyle='#0f2342';ctx.fill();ctx.lineWidth=4;ctx.strokeStyle=C.cyan;ctx.stroke();
+  const qx=90,qy=230,qs=440;
+  ctx.save();ctx.shadowColor='rgba(207,140,42,.35)';ctx.shadowBlur=60;rr(qx-24,qy-24,qs+48,qs+48,30);ctx.fillStyle='#f6f1e7';ctx.fill();ctx.restore();
+  rr(qx-24,qy-24,qs+48,qs+48,30);ctx.lineWidth=2;ctx.strokeStyle='rgba(255,232,190,.9)';ctx.stroke();
   if(rcQR){ctx.imageSmoothingEnabled=false;ctx.drawImage(rcQR,qx,qy,qs,qs);ctx.imageSmoothingEnabled=true;}
-  else{
-    rr(qx,qy,qs,qs,12);ctx.fillStyle='#0a1830';ctx.fill();
-    wrap(NET.err||'Opening a room…',qx+qs/2,qy+qs/2-10,qs-80,30,40,NET.err?C.red:C.dim,'center');
-  }
-  txt('Scan with your phone camera',qx+qs/2,qy+qs+66,34,C.text,'center',700);
-  if(NET.url){ctx.font=`500 20px ${FONT}`;let u=NET.url.replace(/^https?:\/\//,'');if(u.length>46)u=u.slice(0,43)+'…';txt(u,qx+qs/2,qy+qs+100,20,C.dim,'center',500);}
+  else{rr(qx,qy,qs,qs,12);ctx.fillStyle='#e9e2d4';ctx.fill();uwrap(NET.err||'Opening a room…',qx+qs/2,qy+qs/2-10,qs-80,26,36,NET.err?'#a33':'#6b6255','center',600);}
+  utxt('Scan with your phone camera',qx+qs/2,qy+qs+78,28,UI.ivory,'center',600);
+  if(NET.url){let u=NET.url.replace(/^https?:\/\//,'');if(u.length>46)u=u.slice(0,43)+'…';utxt(u,qx+qs/2,qy+qs+110,16,UI.faint,'center',500);}
   const local=/^(localhost|127\.|\[::1\])/.test(location.hostname)||location.protocol==='file:';
-  if(local)wrap('This page is open as '+(location.protocol==='file:'?'a local file':location.host)+'. Phones cannot reach that address. Open the https link (e.g. GitHub Pages) on this TV instead.',qx+qs/2,qy+qs+135,qs+20,20,26,C.red,'center');
+  if(local)uwrap('Opened as '+(location.protocol==='file:'?'a local file':location.host)+': phones cannot reach this. Use the https link on this TV.',qx+qs/2,qy+qs+140,qs+40,17,22,'#f0a07a','center',600);
   const relay=NET.ready?'Relay online':(NET.err||'Connecting to relay…');
-  txt(relay+(NET.tries?`   ·   ${NET.tries} phone attempt${NET.tries>1?'s':''}`:''),qx+qs/2,qy+qs+(local?215:132),20,NET.ready?C.green:C.orange,'center',600);
-  // how to
-  const steps=(rcWifiQR?['Join the Wi-Fi (small QR, right)']:[]).concat(['Scan the big QR code','Tap “Enable steering”','Hold the phone like a wheel']);
-  if(rcWifiQR){
-    const wx=W-300,wy=215,ws=230;
-    rr(wx-10,wy-10,ws+20,ws+20,18);ctx.fillStyle='#0f2342';ctx.fill();ctx.lineWidth=3;ctx.strokeStyle=C.orange;ctx.stroke();
+  utxt('●  '+relay+(NET.tries?`   ·   ${NET.tries} phone attempt${NET.tries>1?'s':''}`:''),qx+qs/2,qy+qs+(local?195:146),16,NET.ready?'#7dffb5':UI.goldL,'center',600,1);
+  // steps
+  const steps=(rcWifiQR?['Join the Wi-Fi (small QR on the right)']:[]).concat(['Scan the big QR code','Tap “Enable steering” on your phone','Hold the phone sideways like a wheel']);
+  steps.forEach((s,i)=>{const y=290+i*62;ctx.strokeStyle=UI.goldL;ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(760,y-9,20,0,7);ctx.stroke();
+    utxt(String(i+1),760,y-1,20,UI.goldL,'center',700);utxt(s,800,y,26,UI.ivory,'left',500);});
+  if(rcWifiQR){const wx=W-310,wy=230,ws=220;
+    rr(wx-14,wy-14,ws+28,ws+28,22);ctx.fillStyle='#f6f1e7';ctx.fill();
     ctx.imageSmoothingEnabled=false;ctx.drawImage(rcWifiQR,wx,wy,ws,ws);ctx.imageSmoothingEnabled=true;
-    txt('Wi-Fi: '+rcWifi.ssid,wx+ws/2,wy+ws+42,26,C.orange,'center',700);
-  }
-  steps.forEach((s,i)=>{const y=275+i*58;ctx.fillStyle=C.orange;ctx.beginPath();ctx.arc(760,y-10,22,0,7);ctx.fill();txt(String(i+1),760,y-1,26,'#1a0d00','center',700);txt(s,806,y,30,C.text,'left',600);});
+    utxt('WI-FI  ·  '+rcWifi.ssid,wx+ws/2,wy+ws+46,16,UI.goldL,'center',700,3);}
   // seats
   for(let i=0;i<4;i++){
-    const s=NET.slots[i],x=730+(i&1)*570,y=520+(i>>1)*140,w=540,h=122,on=s&&s.conn;
-    rr(x,y,w,h,20);ctx.fillStyle=on?'#0f2342':'#0a1322';ctx.fill();ctx.lineWidth=on?5:2;ctx.strokeStyle=on?RCC.colors[i]:'#243249';ctx.stroke();
-    rcCarShape(x+84,y+h-24,86,on?RCC.colors[i]:'#243249',{lean:on?s.in.s*.15:0});
-    txt(`Player ${i+1}`,x+160,y+54,34,on?C.text:C.dim,'left',700);
-    txt(on?'Phone connected':'Waiting…  CPU will drive',x+160,y+92,24,on?C.green:'#4c5f7d','left',600);
-    if(on){                                                       // live steering preview
-      const cx=x+w-62,cy=y+h/2;ctx.save();ctx.translate(cx,cy);ctx.rotate(s.in.s*Math.PI/2);
-      ctx.strokeStyle=RCC.colors[i];ctx.lineWidth=7;ctx.beginPath();ctx.arc(0,0,34,0,7);ctx.stroke();
-      ctx.lineWidth=5;ctx.beginPath();ctx.moveTo(-34,0);ctx.lineTo(34,0);ctx.moveTo(0,0);ctx.lineTo(0,34);ctx.stroke();
-      ctx.fillStyle=C.orange;ctx.fillRect(-4,-40,8,14);ctx.restore();
-    }
+    const s=NET.slots[i],x=730+(i&1)*560,y=530+(i>>1)*132,w=530,h=112,on=s&&s.conn,col=RCC.colors[i];
+    rr(x,y,w,h,56);ctx.fillStyle=on?'rgba(255,255,255,.07)':'rgba(255,255,255,.025)';ctx.fill();
+    ctx.lineWidth=on?2:1.5;ctx.strokeStyle=on?col:'rgba(255,255,255,.1)';ctx.stroke();
+    ctx.save();ctx.globalAlpha=on?1:.35;rcCarShape(x+80,y+h-26,80,on?col:'#3a4152',{lean:on?s.in.s*.15:0});ctx.restore();
+    utxt(`Player ${i+1}`,x+150,y+50,28,on?UI.ivory:UI.faint,'left',700);
+    utxt(on?'Phone connected':'Open seat  ·  a CPU racer will drive',x+150,y+82,18,on?'#7dffb5':UI.faint,'left',500,.5);
+    if(on){const cx=x+w-64,cy=y+h/2;ctx.save();ctx.translate(cx,cy);ctx.rotate(s.in.s*Math.PI/2);
+      ctx.strokeStyle=col;ctx.lineWidth=5;ctx.beginPath();ctx.arc(0,0,30,0,7);ctx.stroke();
+      ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(-30,0);ctx.lineTo(30,0);ctx.moveTo(0,0);ctx.lineTo(0,30);ctx.stroke();
+      ctx.fillStyle=UI.goldL;ctx.fillRect(-3,-36,6,12);ctx.restore();}
   }
-  // buttons
   const n=netCount();
-  if(n)rcBtn('rc:start','Waiting for Player 1 to press START on their phone',730,810,760,130,false,true,true);
-  else rcBtn('rc:start','Start race (keyboard / mouse click)',730,810,760,130,true,true,true);
-  rcBtn('menu','Back to menu',1530,810,320,130,true,false);
-  txt('The race starts from the phone, so waving at the TV will not start it.  Empty seats get CPU racers.',730,980,24,C.dim,'left',500);
-  rcBtn('rc:wifi',rcWifiQR?'Change Wi-Fi QR':'Add Wi-Fi QR',70,935,480,100,true,false,true);
-  txt('Mouse click or press W. Shows a QR so phones can join your Wi-Fi first.',70,1060,20,C.dim,'left',500);
-  if(rc.best)txt(`Fastest lap  ${fmtT(rc.best.t)}  (${rc.best.name})`,730,1020,26,C.yellow,'left',600);
-  drawCam(W-310,36,260,146,false);
+  if(n)rcBtn('rc:start','Player 1: press START on your phone',730,820,760,112,false,true,true);
+  else rcBtn('rc:start','Start with keyboard',730,820,760,112,true,true,true);
+  rcBtn('menu','Back to menu',1520,820,330,112,true,false);
+  utxt('The race starts from the phone, so waving at the TV will not start it.',730,980,18,UI.mute,'left',500,.5);
+  if(rc.best)utxt(`FASTEST LAP  ${fmtT(rc.best.t)}  ·  ${rc.best.name}`,730,1020,16,UI.goldL,'left',700,3);
+  rcBtn('rc:wifi',rcWifiQR?'Change Wi-Fi QR':'Add Wi-Fi QR',90,950,440,80,true,false,true);
+  utxt('Click or press W',310,1056,14,UI.faint,'center',600,2);
+  drawCam(W-300,40,240,135,false);
 }
 function rcDrawResults(t){
   bgSpace(t);
@@ -1408,7 +1431,7 @@ addEventListener('keyup',e=>{
    ===================================================================== */
 const FS_STATES=['fscount','fsplay','fsover'];
 const FS={grav:1500,minSpeed:850,hit:14,max:1,detect:3,cols:['#35e0ff']};   // one player; the camera still looks at up to 3 people to find the one in the middle
-const S={t:0,objs:[],frags:[],pops:[],nextWave:.6,flash:0,shake:0,newBest:false,players:[],blades:[]};
+const S={t:0,objs:[],frags:[],pops:[],sparks:[],nextWave:.6,flash:0,shake:0,newBest:false,players:[],blades:[]};
 for(let i=0;i<FS.max;i++)for(let k=0;k<2;k++)S.blades.push({pl:i,k,x:0,y:0,px:0,py:0,on:false,pon:false,trail:[],speed:0});
 S.blades.push({pl:0,k:2,x:0,y:0,px:0,py:0,on:false,pon:false,trail:[],speed:0});            // mouse
 const fsBody=Array.from({length:FS.max},()=>({sx:new OneEuro(1.2,2),sy:new OneEuro(1.2,2),sw:new OneEuro(1.2,2),to:new OneEuro(1.2,2)}));
@@ -1421,7 +1444,7 @@ function fsSetPoses(n){      // track several people only while Filament Slice i
   try{const r=landmarker.setOptions({numPoses:n});if(r&&r.catch)r.catch(()=>{});}catch(e){}
 }
 function resetSlice(){
-  Object.assign(S,{t:0,objs:[],frags:[],pops:[],nextWave:.6,flash:0,shake:0,newBest:false});
+  Object.assign(S,{t:0,objs:[],frags:[],pops:[],sparks:[],nextWave:.6,flash:0,shake:0,newBest:false});
   S.players=Array.from({length:FS.max},(_,i)=>({i,col:FS.cols[i],score:0,lives:CFG.lives,combo:0,comboT:0,sliced:0,missed:0,
     active:i===0,out:false,lastSx:null,hands:[null,null]}));
   for(const b of S.blades){b.on=b.pon=false;b.trail.length=0;}
@@ -1488,6 +1511,8 @@ function fsSlice(o,b){
     return;
   }
   pl.combo++;pl.comboT=1.3;pl.sliced++;
+  for(let i=0;i<18;i++){const a=rand(0,7),v=rand(300,900);S.sparks.push({x:o.x,y:o.y,vx:Math.cos(a)*v,vy:Math.sin(a)*v,l:rand(.3,.7),w:rand(2,5),c:o.k==='pcb'?(i%2?'#4dff9a':'#ffd23f'):(i%2?'#ff9f43':'#ffd1a1')});}
+  if(pl.combo===4||pl.combo===8||pl.combo===12)showBanner(`Combo ×${Math.min(5,1+Math.floor(pl.combo/4))}`);
   const mult=Math.min(5,1+Math.floor(pl.combo/4)),pts=(o.k==='pcb'?15:10)*mult;
   pl.score+=pts;fsPop(o.x,o.y-30,'+'+pts+(mult>1?'  x'+mult:''),o.k==='pcb'?C.green:C.orange);
   beep(620+Math.min(pl.combo,12)*60,.09,'sawtooth',.05,500);
@@ -1525,6 +1550,7 @@ function updateSlice(dt,t){
   for(const f of S.frags){f.vy+=FS.grav*dt;f.x+=f.vx*dt;f.y+=f.vy*dt;f.rot+=f.vr*dt;f.life-=dt;}
   S.frags=S.frags.filter(f=>f.life>0&&f.y<H+250);
   for(const p of S.pops)p.t+=dt;S.pops=S.pops.filter(p=>p.t<1.1);
+  for(const s of S.sparks){s.x+=s.vx*dt;s.y+=s.vy*dt;s.vy+=900*dt;s.l-=dt;}S.sparks=S.sparks.filter(s=>s.l>0);
   if(S.t>=CFG.roundSeconds&&state==='fsplay')fsEnd();
 }
 
@@ -1598,12 +1624,20 @@ function drawSlice(t){
   }
   ctx.globalAlpha=1;ctx.restore();
   if(S.flash>0){ctx.fillStyle=`rgba(255,77,94,${S.flash*.35})`;ctx.fillRect(0,0,W,H);}
-  brand(50,84,52);
-  const left=Math.max(0,CFG.roundSeconds-S.t),bw=700;
-  rr(CX-bw/2,38,bw,22,11);ctx.fillStyle='rgba(255,255,255,.12)';ctx.fill();
-  rr(CX-bw/2,38,Math.max(8,bw*left/CFG.roundSeconds),22,11);ctx.fillStyle=left<10?C.red:C.cyan;ctx.fill();
-  txt(Math.ceil(left)+' s',CX,96,34,C.text,'center',700);
-  fsPanels();
+  brand(56,86,46);
+  const left=Math.max(0,CFG.roundSeconds-S.t),bw=560,pl=S.players[0];
+  glass(CX-bw/2-30,24,bw+60,96,22);
+  utxt('TIME',CX,58,13,UI.mute,'center',700,5);
+  rr(CX-bw/2,74,bw,8,4);ctx.fillStyle='rgba(255,255,255,.1)';ctx.fill();
+  rr(CX-bw/2,74,Math.max(8,bw*left/CFG.roundSeconds),8,4);ctx.fillStyle=left<10?'#f07a6a':UI.goldL;ctx.fill();
+  utxt(Math.ceil(left)+' s',CX,110,22,left<10?'#f07a6a':UI.ivory,'center',700);
+  glass(W-360,24,330,150,22);
+  utxt('SCORE',W-330,64,14,UI.mute,'left',700,5);utxt(String(pl.score),W-60,140,72,UI.ivory,'right',300);
+  for(let i=0;i<CFG.lives;i++){rr(W-330+i*40,82,30,14,7);ctx.fillStyle=i<pl.lives?'rgba(77,255,154,.85)':'rgba(255,255,255,.08)';ctx.fill();}
+  if(pl.combo>=3){const m=Math.min(5,1+Math.floor(pl.combo/4)),pulse=1+.12*Math.max(0,pl.comboT-1);
+    ctx.save();ctx.translate(CX,200);ctx.scale(pulse,pulse);utxt(`COMBO  ${pl.combo}`+(m>1?`   ×${m}`:''),0,0,40,UI.goldL,'center',700,4);ctx.restore();}
+  for(const s of S.sparks){ctx.globalAlpha=clamp(s.l*2,0,1);ctx.strokeStyle=s.c;ctx.lineWidth=s.w;ctx.lineCap='round';ctx.beginPath();ctx.moveTo(s.x,s.y);ctx.lineTo(s.x-s.vx*.04,s.y-s.vy*.04);ctx.stroke();}
+  ctx.globalAlpha=1;
   drawCam(40,H-190,260,146,false);
   if(camMode()){            // show the middle zone the player has to stand in
     const zx=40+260*(.5-CENTER_ZONE),zw=260*CENTER_ZONE*2;
@@ -1620,16 +1654,10 @@ function fsDraw(t){
     return;
   }
   drawSlice(t);
-  if(state==='fscount'){
-    const n=3-Math.floor(stateT);
-    ctx.fillStyle='rgba(3,8,18,.5)';ctx.fillRect(0,0,W,H);
-    txt(n>0?String(n):'Go!',CX,560,260,n>0?C.text:C.green,'center',700);
-    txt('Swipe your hands through spools and circuit boards',CX,700,40,C.text,'center',600);
-    txt('Avoid the red-hot nozzles!',CX,752,36,C.red,'center',700);
-    const k=fsActive().length;
-    txt(camMode()?'Stand in the middle of the camera view. Friends watching at the sides are ignored.':'',CX,806,28,C.cyan,'center',600);
-    if(!camMode())txt('Mouse mode: move the mouse quickly across the parts',CX,856,28,C.dim,'center',500);
-  }else if(camMode()&&!S.players[0].hands[0]&&!S.players[0].hands[1]&&t-mouse.t>1)txt('Stand in the middle of the camera view',CX,H-150,32,C.orange,'center',600);
+  if(state==='fscount')countdownFX([['Swipe your hands fast through spools and circuit boards',UI.ivory],
+    ['Avoid the red-hot nozzles  ·  '+(camMode()?'stand in the middle of the camera view':'mouse mode: sweep the mouse across the parts'),UI.mute]]);
+  else if(camMode()&&!S.players[0].hands[0]&&!S.players[0].hands[1]&&t-mouse.t>1)utxt('Stand in the middle of the camera view',CX,H-150,28,UI.goldL,'center',600);
+  drawFloaters();
 }
 
 /* =====================================================================
@@ -1640,7 +1668,7 @@ function fsDraw(t){
    ===================================================================== */
 const ES_STATES=['esmenu','esintro','esplay','esend','esresult'];
 const HAND_MODEL='https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task';
-const ES_DUR=300;                        // seconds per mission
+const ES_DUR=360;                        // seconds per mission
 const RX=60,RY=140,RW=1800,RH=770;       // puzzle room rectangle
 let handLM=null,handLoading=false,visionFS=null;
 const HD={ok:false,x:W/2,y:H/2,pinch:false,d:1,lm:null,seen:-9,fx:new OneEuro(1.4,5),fy:new OneEuro(1.4,5)};
@@ -1677,24 +1705,24 @@ function processHands(res,t){
 /* ---------------- the three missions ---------------- */
 const STORIES=[
  {id:'orbital',name:'ORBITAL',title:'Reactor Breach',tag:'Space station',col:'#35e0ff',acc:'#ff8a1f',uv:'#c58bff',ai:'ARIA',
-  stages:['scan','pipes','mirrors','keypad'],final:'lever',
+  stages:['scan','pipes','balance','mirrors','keypad'],final:'lever',
   brief:['Alert. The reactor of Station Halcyon is overloading.','The crew has evacuated. You are the last engineer on board.','Find the override code and stabilise the core in five minutes.'],
-  say:['Scan the crew quarters. The override code was marked in UV ink.','Code recovered. Route coolant to the reactor. Turn the pipe sections.','Coolant flowing. Now aim the stabiliser laser into the core.','Core is locking. Enter the override code and vent the core.'],
-  titles:['Search the crew quarters','Route the coolant pipes','Aim the stabiliser laser','Enter the override code'],
+  say:['Scan the crew quarters. The override code was marked in UV ink.','Code recovered. Route coolant to the reactor. Turn the pipe sections.','The station is spinning out. Lean your body to keep the gyro steady.','Spin under control. Now aim the stabiliser laser into the core.','Core is locking. Enter the override code and vent the core.'],
+  titles:['Search the crew quarters','Route the coolant pipes','Stabilise the spin with your body','Aim the stabiliser laser','Enter the override code'],
   props:['locker','bunk','tank','screen'],panel:'VENT',lever:'VENT THE CORE',
   win:['Core stabilised. Halcyon is safe.','Outstanding work, engineer.'],fail:['Reactor breach.','Station lost.'],winTitle:'REACTOR STABILISED',failTitle:'STATION LOST'},
  {id:'nexus',name:'NEXUS LAB',title:'AI Lockdown',tag:'Futuristic high-tech lab',col:'#c86bff',acc:'#4dffd2',uv:'#7dfcff',ai:'NOVA',
-  stages:['memory','wires','pattern','override'],
+  stages:['memory','wires','bodyscan','pattern','override'],
   brief:['Welcome to Nexus Lab. I am NOVA, and I have sealed every door.','In five minutes the plasma sweep begins.','Four of my locks stand between you and the exit. Shall we play?'],
-  say:['Let us test your memory, human. Repeat what I show you.','Lucky. My bio-lock still needs rewiring. Follow the schematic, if you can.','You will never guess my unlock pattern. Do not watch my cache screen.','Last chance. Charge the override while I hunt you with my scanner.'],
-  titles:['Beat NOVA\'s memory test','Rewire the bio-lock','Crack the pattern lock','Charge the override'],
+  say:['Let us test your memory, human. Repeat what I show you.','Lucky. My bio-lock still needs rewiring. Follow the schematic, if you can.','Body scan required. Copy my silhouettes exactly, or stay here forever.','You will never guess my unlock pattern. Do not watch my cache screen.','Last chance. Charge the override while I hunt you with my scanner.'],
+  titles:['Beat NOVA\'s memory test','Rewire the bio-lock','Pass the body scan','Crack the pattern lock','Charge the override'],
   wires:'BIO-LOCK',
   win:['Impossible. You outsmarted me.','The blast door is open. Go.'],fail:['Plasma sweep engaged.','Lockdown complete.'],winTitle:'DOOR UNLOCKED',failTitle:'LOCKDOWN COMPLETE'},
  {id:'abyss',name:'ABYSS-7',title:'Deep Sea Escape',tag:'Deep-sea base',col:'#2ee6c8',acc:'#ffd23f',uv:'#ff7de9',ai:'TIDE',
-  stages:['valves','sonar','tune','keypad'],final:'pump',
+  stages:['valves','sonar','swim','tune','keypad'],final:'pump',
   brief:['Hull breach on Abyss-7, three thousand metres down.','Water is rising and the escape pod is locked.','Seal the leaks, find the launch code and get out.'],
-  say:['Three pipes are leaking. Turn the valve wheels shut.','Leaks sealed. The launch code is on buoys outside. Use the sonar.','Code found. Tune the radio to the rescue sub frequency.','Rescue sub is waiting. Enter the launch code and pump the release.'],
-  titles:['Seal the leaking valves','Find the code with sonar','Tune in the rescue sub','Launch the escape pod'],
+  say:['Three pipes are leaking. Turn the valve wheels shut.','Leaks sealed. The launch code is on buoys outside. Use the sonar.','The corridor is flooded. Swim to the pod airlock with big arm strokes.','You made it. Tune the radio to the rescue sub frequency.','Rescue sub is waiting. Enter the launch code and pump the release.'],
+  titles:['Seal the leaking valves','Find the code with sonar','Swim to the airlock','Tune in the rescue sub','Launch the escape pod'],
   tune:'RESCUE FREQUENCY',lever:'PUMP THE RELEASE',
   win:['Pod away. The rescue sub has you.','Welcome back to the surface.'],fail:['The module is flooded.','Abyss-7 is lost.'],winTitle:'POD LAUNCHED',failTitle:'BASE FLOODED'}
 ];
@@ -2320,13 +2348,158 @@ function drawSonar(P,t){
   txt('SONAR  ·  pinch to send a ping, then hold your hand on each glowing buoy',CX,RY+RH-24,22,C.dim,'center',600);
 }
 
+/* ---------------- full-body puzzles (body tracking takes over for these stages) ---------------- */
+const esBody=()=>state==='esplay'&&ES.P&&PUZZLES[ES.P.type]&&PUZZLES[ES.P.type].body&&ES.clear<=0;
+function bodyLean(){
+  const t=performance.now()/1000;
+  if(t-mouse.t<2||!camMode())return clamp((mouse.x-CX)/500,-1.5,1.5);
+  if(!tracked(t))return 0;
+  const asp=(video.videoWidth/video.videoHeight)||16/9;
+  return clamp(P.hasHips?P.lean/.22:(P.sx-asp/2)/(P.shW*1.5),-1.5,1.5);
+}
+function drawStick(cx,cy,s,pose,col,lw=10,alpha=1){        // simple figure: Y, T, L (your left arm up), R
+  ctx.save();ctx.globalAlpha=alpha;ctx.strokeStyle=col;ctx.lineWidth=lw;ctx.lineCap='round';
+  const sh=cy-s*.55,hip=cy+s*.25;
+  ctx.beginPath();ctx.arc(cx,sh-s*.25,s*.16,0,7);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(cx,sh-s*.08);ctx.lineTo(cx,hip);ctx.moveTo(cx,hip);ctx.lineTo(cx-s*.22,cy+s*.85);ctx.moveTo(cx,hip);ctx.lineTo(cx+s*.22,cy+s*.85);ctx.stroke();
+  const arm=(side,kind)=>{const x0=cx+side*s*.18;ctx.beginPath();ctx.moveTo(cx,sh);ctx.lineTo(x0,sh);
+    if(kind==='up')ctx.lineTo(x0+side*s*.25,sh-s*.6);else if(kind==='out')ctx.lineTo(x0+side*s*.62,sh);else ctx.lineTo(x0+side*s*.12,sh+s*.55);ctx.stroke();};
+  const k={Y:['up','up'],T:['out','out'],L:['up','down'],R:['down','up']}[pose]||['down','down'];
+  arm(-1,k[0]);arm(1,k[1]);ctx.restore();
+}
+function drawLiveSkeleton(cx,cy,scale,col){                 // the player's pose, centred on their shoulders
+  if(!P.lm||!tracked(performance.now()/1000))return;
+  const lm=P.lm,asp=(video.videoWidth/video.videoHeight)||16/9;
+  const pt=i=>[cx+((1-lm[i].x)*asp-P.sx)/P.torso*scale,cy+(lm[i].y-P.sy)/P.torso*scale];
+  ctx.save();ctx.strokeStyle=col;ctx.lineWidth=12;ctx.lineCap='round';ctx.shadowColor=col;ctx.shadowBlur=20;
+  for(const [a,b] of CONN){if((lm[a].visibility??1)<.4||(lm[b].visibility??1)<.4)continue;const A=pt(a),B=pt(b);ctx.beginPath();ctx.moveTo(A[0],A[1]);ctx.lineTo(B[0],B[1]);ctx.stroke();}
+  const h=pt(0);ctx.beginPath();ctx.arc(h[0],h[1],scale*.2,0,7);ctx.stroke();ctx.restore();
+}
+function bodyHint(t){
+  if(!camMode())return 'No camera: use the mouse instead';
+  if(!tracked(t))return 'Step back so the camera can see your whole upper body';
+  return '';
+}
+
+/* ORBITAL: lean your body to keep the station's gyro in the green */
+function makeBalance(){return{type:'balance',g:.7,wind:-.5,wT:0,prog:0,L:0};}
+function updBalance(Q,dt){
+  Q.wT-=dt;if(Q.wT<=0){Q.wT=rand(1.6,3);Q.wind=rand(.35,.75)*(Math.random()<.5?-1:1);}
+  Q.L+=(bodyLean()-Q.L)*Math.min(1,dt*8);
+  Q.g=clamp(Q.g+(Q.wind*.55+Q.L*.9)*dt,-1,1);
+  const ok=Math.abs(Q.g)<.25;Q.prog=ok?Q.prog+dt:Math.max(0,Q.prog-dt*.6);
+  if(ok&&Math.random()<dt*5)beep(900+Q.prog*120,.04,'sine',.02);
+  return Q.prog>=5;
+}
+function drawBalance(Q,t){
+  const S0=esS(),cx=CX,cy=RY+430;
+  txt('STABILISE THE SPIN  ·  lean your whole body left or right',CX,RY+56,24,S0.col,'center',700);
+  ctx.save();ctx.translate(cx,cy);
+  ctx.strokeStyle='rgba(255,255,255,.08)';ctx.lineWidth=40;ctx.beginPath();ctx.arc(0,0,250,Math.PI*1.1,Math.PI*1.9);ctx.stroke();
+  ctx.strokeStyle='rgba(77,255,154,.45)';ctx.beginPath();ctx.arc(0,0,250,Math.PI*1.5-.25*.4*Math.PI,Math.PI*1.5+.25*.4*Math.PI);ctx.stroke();
+  ctx.rotate(Q.g*.7);
+  for(let i=0;i<3;i++){ctx.strokeStyle=i===1?S0.acc:S0.col;ctx.lineWidth=6;ctx.beginPath();ctx.ellipse(0,0,190-i*50,(190-i*50)*(.35+.2*Math.sin(t*2+i)),0,0,7);ctx.stroke();}
+  ctx.fillStyle='#24324d';ctx.fillRect(-160,-14,320,28);ctx.fillStyle=S0.col;ctx.beginPath();ctx.arc(0,0,40,0,7);ctx.fill();
+  ctx.restore();
+  const na=Math.PI*1.5+Q.g*.4*Math.PI;
+  ctx.save();ctx.strokeStyle=Math.abs(Q.g)<.25?C.green:C.red;ctx.lineWidth=8;ctx.lineCap='round';ctx.shadowColor=ctx.strokeStyle;ctx.shadowBlur=20;
+  ctx.beginPath();ctx.moveTo(cx+Math.cos(na)*200,cy+Math.sin(na)*200);ctx.lineTo(cx+Math.cos(na)*300,cy+Math.sin(na)*300);ctx.stroke();ctx.restore();
+  // your lean
+  ctx.save();ctx.translate(320,RY+470);ctx.rotate(Q.L*.35);drawStick(0,0,180,'',S0.col,10);ctx.restore();
+  txt('YOU',320,RY+680,20,S0.col,'center',700);
+  txt(Q.L<-.2?'◀ leaning left':Q.L>.2?'leaning right ▶':'standing straight',320,RY+715,20,C.dim,'center',600);
+  ctx.strokeStyle='rgba(255,255,255,.12)';ctx.lineWidth=14;ctx.beginPath();ctx.arc(1600,RY+600,90,0,7);ctx.stroke();
+  ctx.strokeStyle=C.green;ctx.beginPath();ctx.arc(1600,RY+600,90,-Math.PI/2,-Math.PI/2+Math.PI*2*Q.prog/5);ctx.stroke();
+  txt(Math.ceil(5-Q.prog)+' s',1600,RY+614,40,C.text,'center',700);txt('HOLD IN GREEN',1600,RY+730,18,C.green,'center',700);
+  const hint=bodyHint(performance.now()/1000);if(hint)txt(hint,CX,RY+RH-24,24,C.orange,'center',600);
+}
+
+/* NEXUS: copy NOVA's body-scan silhouettes */
+const POSE_NAME={Y:'Both arms up',T:'Arms straight out',L:'Your left arm up',R:'Your right arm up'};
+function poseNow(){
+  const t=performance.now()/1000;if(!tracked(t)||!P.lm)return null;
+  const lm=P.lm,asp=(video.videoWidth/video.videoHeight)||16/9,X=i=>(1-lm[i].x)*asp,Y=i=>lm[i].y,V=i=>lm[i].visibility??1;
+  const tor=P.torso,sh=P.shW;
+  const up=i=>V(i)>.4&&Y(i)<Y(0)-.02;
+  const out=(w,s,dir)=>V(w)>.4&&Math.abs(Y(w)-Y(s))<.45*tor&&(X(w)-X(s))*dir>.8*sh;
+  const lU=up(15),rU=up(16),lO=out(15,11,-1),rO=out(16,12,1);
+  if(lU&&rU)return'Y';if(lO&&rO)return'T';if(lU&&!rU)return'L';if(rU&&!lU)return'R';return null;
+}
+function makeBodyScan(){return{type:'bodyscan',list:shuffle(['Y','T','L','R']).slice(0,3),i:0,hold:0,cur:null,flash:0};}
+function updBodyScan(Q,dt){
+  Q.flash=Math.max(0,Q.flash-dt);
+  const want=Q.list[Q.i];let cur=poseNow();
+  if(EI.pressed&&EI.src==='mouse'){cur=want;Q.hold=1;}
+  Q.cur=cur;Q.hold=cur===want?Q.hold+dt:Math.max(0,Q.hold-dt*2);
+  if(cur===want&&Math.random()<dt*6)beep(700+Q.hold*500,.03,'sine',.02);
+  if(Q.hold>=1){Q.i++;Q.hold=0;Q.flash=.6;sfx.gear();esBurst(CX,RY+430,esS().acc,30,500);if(Q.i>=Q.list.length)return true;}
+  return false;
+}
+function drawBodyScan(Q,t){
+  const S0=esS(),want=Q.list[Math.min(Q.i,Q.list.length-1)],ok=Q.cur===want;
+  txt('BIOMETRIC BODY SCAN  ·  copy the silhouette with your body',CX,RY+56,24,S0.col,'center',700);
+  Q.list.forEach((p,k)=>{const x=CX-260+k*260,y=RY+90,done=k<Q.i,cur=k===Q.i;
+    rr(x-90,y,180,120,16);ctx.fillStyle=cur?'rgba(200,107,255,.18)':'rgba(18,8,34,.8)';ctx.fill();ctx.lineWidth=2;ctx.strokeStyle=done?C.green:cur?S0.acc:'rgba(200,107,255,.3)';ctx.stroke();
+    drawStick(x,y+70,70,p,done?C.green:cur?S0.acc:'#5a4a7a',5);});
+  const cx=CX,cy=RY+500;
+  rr(cx-330,RY+250,660,440,30);ctx.fillStyle='rgba(10,6,22,.85)';ctx.fill();ctx.lineWidth=2;ctx.strokeStyle=ok?C.green:S0.col;ctx.stroke();
+  const sy=RY+250+((t*220)%440);ctx.fillStyle='rgba(200,107,255,.18)';ctx.fillRect(cx-330,sy,660,6);
+  drawStick(cx,cy,180,want,ok?C.green:'rgba(200,107,255,.55)',22,.6);
+  drawLiveSkeleton(cx,cy-99,150,ok?C.green:S0.acc);
+  txt(POSE_NAME[want],cx,RY+730,34,ok?C.green:C.text,'center',700);
+  rr(cx-260,RY+748,520,12,6);ctx.fillStyle='rgba(255,255,255,.1)';ctx.fill();rr(cx-260,RY+748,520*clamp(Q.hold,0,1),12,6);ctx.fillStyle=C.green;ctx.fill();
+  const hint=bodyHint(performance.now()/1000);if(hint)txt(hint+(camMode()?'':'  (click to match)'),CX,RY+238,20,C.orange,'center',600);
+  if(Q.flash>0){ctx.fillStyle=`rgba(77,255,154,${Q.flash*.25})`;ctx.fillRect(RX,RY,RW,RH);}
+}
+
+/* ABYSS: swim to the airlock with big arm strokes */
+function makeSwim(){return{type:'swim',prog:0,st:'down',strokes:0,kick:0,bub:[]};}
+function updSwim(Q,dt){
+  Q.kick=Math.max(0,Q.kick-dt*2);Q.prog=Math.max(0,Q.prog-dt*.015);
+  let stroke=false;const t=performance.now()/1000;
+  if(tracked(t)&&P.lm){
+    const lm=P.lm,wy=Math.min(lm[15].y,lm[16].y),wl=Math.max(lm[15].y,lm[16].y),sy=(lm[11].y+lm[12].y)/2;
+    if(Q.st==='down'&&wy<lm[0].y)Q.st='up';
+    else if(Q.st==='up'&&wl>sy+.25*P.torso&&wy>sy){Q.st='down';stroke=true;}
+  }
+  if(EI.pressed&&EI.src==='mouse')stroke=true;
+  if(stroke){Q.strokes++;Q.prog=Math.min(1,Q.prog+.12);Q.kick=1;beep(220,.2,'sine',.05);
+    for(let i=0;i<14;i++)Q.bub.push({x:260+Q.prog*1300+rand(-40,0),y:RY+330+rand(-30,30),vy:-rand(60,160),r:rand(3,9),l:1.4});}
+  for(const b of Q.bub){b.y+=b.vy*dt;b.l-=dt;}Q.bub=Q.bub.filter(b=>b.l>0);
+  return Q.prog>=1;
+}
+function drawSwim(Q,t){
+  const S0=esS(),y=RY+330;
+  txt('SWIM TO THE AIRLOCK  ·  raise both arms above your head, then pull them down',CX,RY+56,24,S0.col,'center',700);
+  ctx.fillStyle='#0b2b3a';rr(160,y-150,1600,300,150);ctx.fill();ctx.strokeStyle='#335a6e';ctx.lineWidth=6;ctx.stroke();
+  for(let i=0;i<9;i++){const x=240+i*180;ctx.strokeStyle='rgba(46,230,200,.15)';ctx.lineWidth=3;ctx.beginPath();ctx.ellipse(x,y,26,145,0,0,7);ctx.stroke();}
+  ctx.save();ctx.shadowColor=S0.acc;ctx.shadowBlur=40;ctx.fillStyle=Q.prog>.95?C.green:'#e8c35a';ctx.beginPath();ctx.arc(1690,y,110,0,7);ctx.fill();ctx.restore();
+  ctx.fillStyle='#0b2b3a';ctx.beginPath();ctx.arc(1690,y,70,0,7);ctx.fill();txt('AIRLOCK',1690,y+140,20,S0.acc,'center',700);
+  const dx=260+Q.prog*1300,sw=Math.sin(t*6)*(.3+Q.kick);
+  ctx.save();ctx.translate(dx,y+Math.sin(t*2)*10);
+  ctx.fillStyle='#e8c35a';ctx.beginPath();ctx.ellipse(0,0,90,34,0,0,7);ctx.fill();
+  ctx.fillStyle='#04324a';ctx.beginPath();ctx.arc(70,-6,24,0,7);ctx.fill();ctx.strokeStyle='#e0b860';ctx.lineWidth=5;ctx.stroke();
+  ctx.strokeStyle='#e8c35a';ctx.lineWidth=16;ctx.lineCap='round';
+  ctx.beginPath();ctx.moveTo(30,-10);ctx.lineTo(80+Math.cos(sw*2)*40,-50-Math.sin(sw*2)*30);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(-80,0);ctx.lineTo(-150,sw*40);ctx.moveTo(-80,8);ctx.lineTo(-150,-sw*40);ctx.stroke();
+  ctx.restore();
+  ctx.strokeStyle='rgba(200,255,255,.6)';ctx.lineWidth=2;for(const b of Q.bub){ctx.globalAlpha=b.l/1.4;ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,7);ctx.stroke();}ctx.globalAlpha=1;
+  // stroke guide
+  const ph=(Math.sin(t*3)+1)/2;drawStick(300,RY+600,80,ph>.5?'Y':'',S0.col,6);
+  txt(`Strokes ${Q.strokes}`,440,RY+580,30,C.text,'left',700);txt(Q.st==='up'?'Now pull your arms down!':'Arms up!',440,RY+622,24,S0.acc,'left',700);
+  rr(CX+60,RY+585,760,16,8);ctx.fillStyle='rgba(255,255,255,.1)';ctx.fill();rr(CX+60,RY+585,760*Q.prog,16,8);ctx.fillStyle=S0.col;ctx.fill();
+  const hint=bodyHint(performance.now()/1000);if(hint)txt(hint+(camMode()?'':'  (click to swim)'),CX,RY+RH-30,22,C.orange,'center',600);
+}
+
 const PUZZLES={
   scan:{make:makeScan,upd:updScan,draw:drawScan},wires:{make:makeWires,upd:updWires,draw:drawWires},
   tune:{make:makeTune,upd:updTune,draw:drawTune},keypad:{make:makeKeypad,upd:updKeypad,draw:drawKeypad},
   pipes:{make:makePipes,upd:updPipes,draw:drawPipes},mirrors:{make:makeMirrors,upd:updMirrors,draw:drawMirrors},
   memory:{make:makeMemory,upd:updMemory,draw:drawMemory},pattern:{make:makePattern,upd:updPattern,draw:drawPattern},
   override:{make:makeOverride,upd:updOverride,draw:drawOverride},valves:{make:makeValves,upd:updValves,draw:drawValves},
-  sonar:{make:makeSonar,upd:updSonar,draw:drawSonar}};
+  sonar:{make:makeSonar,upd:updSonar,draw:drawSonar},
+  balance:{make:makeBalance,upd:updBalance,draw:drawBalance,body:true},bodyscan:{make:makeBodyScan,upd:updBodyScan,draw:drawBodyScan,body:true},
+  swim:{make:makeSwim,upd:updSwim,draw:drawSwim,body:true}};
 /* ---------------- update ---------------- */
 function esUpdate(dt,t){
   ES.lt+=dt;const L=ES.lines[ES.li];
@@ -2342,7 +2515,7 @@ function esUpdate(dt,t){
   if(esLeft()<30&&Math.floor(ES.t*2)!==Math.floor((ES.t-dt)*2))beep(1400,.05,'square',.025);
   if(ES.clear>0){
     ES.clear-=dt;
-    if(ES.clear<=0){ES.stage++;if(ES.stage>=4)return esFinish(true);esStageInit();}
+    if(ES.clear<=0){ES.stage++;if(ES.stage>=esS().stages.length)return esFinish(true);esStageInit();}
     return;
   }
   const P=ES.P;let done=false;
@@ -2410,10 +2583,11 @@ function esHUD(t){
   const S0=esS(),left=esLeft(),danger=left<60;
   rr(30,18,W-60,104,18);ctx.fillStyle='rgba(3,8,18,.88)';ctx.fill();ctx.lineWidth=2;ctx.strokeStyle=S0.col;ctx.stroke();
   txt(S0.name,60,62,34,S0.col,'left',700);
-  txt(`${ES.stage+1}/4  ${S0.titles[Math.min(3,ES.stage)]}`,60,102,26,C.text,'left',600);
-  for(let k=0;k<4;k++){const x=760+k*60,done=k<ES.stage||(k===ES.stage&&ES.clear>0),cur=k===ES.stage;
+  const NS=S0.stages.length;
+  txt(`${ES.stage+1}/${NS}  ${S0.titles[Math.min(NS-1,ES.stage)]}`,60,102,26,C.text,'left',600);
+  for(let k=0;k<NS;k++){const x=730+k*56,done=k<ES.stage||(k===ES.stage&&ES.clear>0),cur=k===ES.stage;
     ctx.fillStyle=done?C.green:cur?S0.col:'#24324d';ctx.beginPath();ctx.arc(x,70,cur?14:11,0,7);ctx.fill();
-    if(k<3){ctx.fillStyle=done?C.green:'#24324d';ctx.fillRect(x+14,68,32,4);}}
+    if(k<NS-1){ctx.fillStyle=done?C.green:'#24324d';ctx.fillRect(x+14,68,28,4);}}
   if(usesCode()){txt('CODE',1040,58,18,C.dim,'left',700);
   for(let k=0;k<4;k++){const x=1040+k*58;rr(x,68,48,44,8);ctx.fillStyle='#0b1428';ctx.fill();ctx.lineWidth=2;ctx.strokeStyle=ES.found[k]?S0.uv:'#24324d';ctx.stroke();
     txt(ES.found[k]?String(ES.code[k]):'?',x+24,102,30,ES.found[k]?C.text:'#3a4a66','center',700);}}
@@ -2485,7 +2659,7 @@ function esDrawIntro(t){
   ctx.save();ctx.globalAlpha=p;ctx.shadowColor=S0.col;ctx.shadowBlur=40;
   txt(S0.name,CX+gl,330,150,S0.col,'center',700);ctx.restore();
   ctx.globalAlpha=p;txt(S0.title.toUpperCase(),CX,410,48,S0.acc,'center',700);
-  txt('MISSION TIME  05:00',CX,470,30,C.text,'center',600);ctx.globalAlpha=1;
+  txt('MISSION TIME  '+fmtMS(ES_DUR),CX,470,30,C.text,'center',600);ctx.globalAlpha=1;
   ES.lines.forEach((l,i)=>{if(i>ES.li)return;const s=i<ES.li?l:l.slice(0,Math.floor(ES.lt*34));txt(s,CX,580+i*56,36,i===ES.li?C.text:'#8fb0d6','center',500);});
   if(stateT>2)rcBtn('es:go','Start mission',CX-260,800,520,120,true,true);
   txt('Pinch the button, or it starts by itself',CX,960,24,C.dim,'center',500);
@@ -2502,8 +2676,8 @@ function esDrawPlay(t){
   esHUD(t);
   if(HINTS[P.type])txt(HINTS[P.type],CX,RY+RH-18,22,C.dim,'center',500);
   if(ES.clear>0){ctx.fillStyle='rgba(3,8,18,.55)';ctx.fillRect(0,RY,W,RH);
-    ctx.save();ctx.shadowColor=C.green;ctx.shadowBlur=30;txt(ES.stage<3?'COMPLETE':'',CX,560,120,C.green,'center',700);ctx.restore();}
-  esNarrator(t);esHandView(40,H-160,240,130);esScanlines();
+    ctx.save();ctx.shadowColor=C.green;ctx.shadowBlur=30;txt(ES.stage<esS().stages.length-1?'COMPLETE':'',CX,560,120,C.green,'center',700);ctx.restore();}
+  esNarrator(t);if(esBody())drawCam(40,H-160,240,135,false);else esHandView(40,H-160,240,130);esScanlines();
   if(ES.flash>0){ctx.fillStyle=ES.flashCol;ctx.globalAlpha=ES.flash*.35;ctx.fillRect(0,0,W,H);ctx.globalAlpha=1;}
 }
 function esDrawEnd(t){
@@ -2787,7 +2961,7 @@ function rcBtn(id,label,x,y,w,h,on,primary,noHand=false){
 function drawExitBtn(){
   if(!EXIT_STATES.includes(state))return;
   const x=W-150,y=H/2-28,w=130,h=56,hv=ptr.on&&inRect(ptr,x-10,y-10,w+20,h+20);
-  addBtn('menu',x,y,w,h,true);
+  addBtn('menu',x,y,w,h,true,esBody());               // during body puzzles a raised arm must not press Exit
   ctx.save();ctx.globalAlpha=hv?1:.7;
   rr(x,y,w,h,28);ctx.fillStyle='rgba(10,12,18,.82)';ctx.fill();ctx.lineWidth=hv?2.5:1.5;ctx.strokeStyle=hv?UI.goldL:'rgba(255,255,255,.25)';ctx.stroke();
   utxt('✕  Exit',x+w/2,y+36,20,UI.ivory,'center',700,1);
@@ -2804,6 +2978,7 @@ function drawRipples(){
   for(const r of ripples){ctx.save();ctx.globalAlpha=1-r.t/.6;ctx.strokeStyle=UI.goldL;ctx.lineWidth=3;ctx.beginPath();ctx.arc(r.x,r.y,24+r.t*120,0,7);ctx.stroke();ctx.restore();}
 }
 function drawCursor(){
+  if(esBody()&&ptr.src!=='mouse'){drawRipples();return;}
   if(ES_STATES.includes(state)&&EI.on){esCursor();drawRipples();return;}
   if(!ptr.on){drawRipples();return;}
   const {x,y}=ptr,down=ptr.src==='pinch'&&EI.down,hv=!!hoverId;
@@ -2821,7 +2996,7 @@ function drawCursor(){
    ===================================================================== */
 function update(dt,t){
   stateT+=dt;lock=Math.max(0,lock-dt);
-  if(state!=='menu'&&state!=='home'&&state!=='fsplay'&&tracked(t)&&P.bothUp){exitHold+=dt;if(exitHold>1.5){exitHold=0;go('menu');}}
+  if(state!=='menu'&&state!=='home'&&state!=='fsplay'&&!ES_STATES.includes(state)&&tracked(t)&&P.bothUp){exitHold+=dt;if(exitHold>1.5){exitHold=0;go('menu');}}
   else exitHold=Math.max(0,exitHold-dt*2);
   uiInput(t,dt);
   updateUI(dt,t);
@@ -2847,16 +3022,13 @@ function draw(t){
   else if(state==='calib')drawCalib(t);
   else if(state==='countdown'||state==='play'){
     drawScene(t);
-    if(state==='countdown'){
-      const n=3-Math.floor(stateT);
-      ctx.fillStyle='rgba(3,8,18,.45)';ctx.fillRect(0,0,W,H);
-      txt(n>0?String(n):'Go!',CX,560,260,n>0?C.text:C.green,'center',700);
-    }
+    if(state==='countdown')countdownFX([['Lean, jump and squat to run the workshop',UI.ivory],['Grab gears for bonus points  ·  avoid toolboxes and lasers',UI.mute]]);
     if(state==='countdown'||(state==='play'&&R.t<7))controlsHint();
     if(state==='play'&&camMode()&&!tracked(t)){
-      ctx.fillStyle='rgba(3,8,18,.7)';ctx.fillRect(0,0,W,H);
-      txt('Player lost',CX,500,90,C.orange,'center',700);
-      txt('Step back into the camera view to continue',CX,570,36,C.text,'center',500);
+      ctx.fillStyle='rgba(7,9,13,.78)';ctx.fillRect(0,0,W,H);
+      utxt('PAUSED',CX,440,16,UI.goldL,'center',700,8);
+      utxt('We lost sight of you',CX,520,64,UI.ivory,'center',600);
+      utxt('Step back into the camera view to continue',CX,580,26,UI.mute,'center',500,1);
     }
   }
   else if(state==='over')drawOver(t);

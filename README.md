@@ -34,10 +34,10 @@ Files: `index.html` (TV: menu, Maker Run, Circuit Racers), `controller.html` (ph
 ## Escape Protocol (finger pinch)
 A 2D escape room controlled with one hand: pinch thumb and index finger to press, keep pinching to drag.
 Pick one of three missions: **Orbital** (stop a space-station reactor), **Nexus Lab** (escape a rogue AI's lockdown) or **Abyss-7** (get out of a flooding deep-sea base).
-Each mission has its own four puzzles in five minutes:
-- **Orbital**: UV scanner search for the code, rotate pipe tiles to route coolant, flip mirrors to aim a laser into the core, then keypad + lever.
-- **Nexus Lab**: repeat NOVA's light sequence, rewire the bio-lock, draw the leaked unlock pattern, then hold the override charge while dodging NOVA's scanner beam.
-- **Abyss-7**: turn three valve wheels shut, ping the sonar to find the code buoys, tune the rescue frequency, then keypad + pump the release.
+Each mission has its own five puzzles in six minutes, mixing hand pinches with full-body moves:
+- **Orbital**: UV scanner search for the code, rotate pipe tiles to route coolant, **lean your body** to keep the spinning station in the green, flip mirrors to aim a laser into the core, then keypad + lever.
+- **Nexus Lab**: repeat NOVA's light sequence, rewire the bio-lock, **copy NOVA's body-scan poses** (arms up, arms out, one arm up), draw the leaked unlock pattern, then hold the override charge while dodging NOVA's scanner beam.
+- **Abyss-7**: turn three valve wheels shut, ping the sonar to find the code buoys, **swim with big arm strokes** to the airlock, tune the rescue frequency, then keypad + pump the release.
 Wrong moves cost time. Stand about 1 to 1.5 m from the camera so it can see your fingers. The narrator speaks; press **V** to mute. No camera? Use the mouse (click and drag).
 
 ## After every game
