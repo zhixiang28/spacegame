@@ -12,7 +12,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Manrope:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
   :root{
     --bg:#050b16; --panel:#0e1d36; --cyan:#35e0ff; --orange:#ff8a1f; --yellow:#ffd23f; --text:#e8f4ff;
@@ -22,19 +22,19 @@
   canvas#c{position:fixed;inset:0;width:100%;height:100%;display:block;object-fit:contain;background:#000;cursor:none}
   video#cam{position:fixed;width:2px;height:2px;opacity:0;pointer-events:none}
   #start{position:fixed;inset:0;z-index:5;display:flex;flex-direction:column;align-items:center;justify-content:center;
-    gap:14px;text-align:center;
-    background:
-      linear-gradient(rgba(53,224,255,.06) 1px,transparent 1px) 0 0/48px 48px,
-      linear-gradient(90deg,rgba(53,224,255,.06) 1px,transparent 1px) 0 0/48px 48px,
-      radial-gradient(ellipse at 50% 40%,#12305a,#050b16 70%)}
+    gap:18px;text-align:center;font-family:Manrope,system-ui,sans-serif;
+    background:radial-gradient(ellipse at 30% 25%,rgba(207,140,42,.16),transparent 55%),
+      radial-gradient(ellipse at 80% 80%,rgba(70,120,190,.16),transparent 55%),linear-gradient(#07090d,#0d121c)}
   #start h1{margin:0;font-size:clamp(44px,9vw,120px);font-weight:700;letter-spacing:.01em;line-height:1;color:#cf8c2a}
   #start h1 span{color:#898d8e}
-  #start h2{margin:0 0 20px;font-size:clamp(18px,2.4vw,32px);font-weight:500;color:var(--orange);letter-spacing:.14em}
-  #start button{font:inherit;font-size:clamp(20px,2.4vw,34px);font-weight:700;padding:.6em 1.6em;border-radius:14px;
-    border:3px solid var(--orange);background:rgba(255,138,31,.12);color:var(--text);cursor:pointer}
-  #start button:hover,#start button:focus-visible{background:var(--orange);color:#1a0d00;outline:none}
-  #start p{margin:18px 0 0;max-width:640px;color:#8fb0d6;font-size:clamp(14px,1.4vw,19px);line-height:1.5}
-  #start img{max-height:clamp(70px,18vh,200px);max-width:80vw}
+  #start h2{margin:4px 0 26px;font-size:clamp(13px,1.3vw,18px);font-weight:700;color:#ebbd6e;letter-spacing:.6em}
+  #start button{font:inherit;font-size:clamp(17px,1.6vw,24px);font-weight:700;letter-spacing:.06em;padding:.9em 2.6em;border-radius:999px;
+    border:1px solid rgba(255,232,190,.9);background:linear-gradient(#e7ad55,#c27c25);color:#1d1406;cursor:pointer;
+    box-shadow:0 12px 40px rgba(207,140,42,.35);transition:transform .2s,box-shadow .2s}
+  #start button:hover,#start button:focus-visible{transform:translateY(-2px);box-shadow:0 18px 50px rgba(207,140,42,.5);outline:none}
+  #start #installBtn{background:rgba(255,255,255,.06);color:#f4efe6;border-color:rgba(255,255,255,.25);box-shadow:none;font-size:clamp(13px,1.1vw,16px);padding:.6em 1.8em}
+  #start p{margin:22px 0 0;max-width:620px;color:#9aa0a9;font-size:clamp(13px,1.1vw,16px);line-height:1.7}
+  #start img{max-height:clamp(70px,16vh,180px);max-width:80vw}
 </style>
 </head>
 <body>
@@ -45,11 +45,11 @@
   <!-- logo.png (transparent) is the SPACElogic logo; the text version is the fallback if it is missing -->
   <img src="logo.png" alt="SPACElogic" onload="document.querySelector('#start h1').style.display='none'" onerror="this.remove()">
   <h1>SPACE<span>logic</span></h1>
-  <h2>MAKER SPACE ARCADE</h2>
-  <button id="startBtn">Start the station</button>
-  <button id="installBtn" style="display:none;font-size:clamp(14px,1.4vw,20px);padding:.4em 1.2em;border-color:var(--cyan)">Install as an app</button>
-  <p>Allow camera access when asked. Stand 2 to 3 metres from the TV with the camera at chest height.
-     No camera? Mouse and arrow keys work for testing. Press F any time to toggle full screen.</p>
+  <h2>INTERACTIVE EXPERIENCE LAB</h2>
+  <button id="startBtn">Start the experience</button>
+  <button id="installBtn" style="display:none">Install as an app</button>
+  <p>For staff: allow camera access when asked, with the camera at chest height.
+     Visitors control everything with a pinch of thumb and index finger. Mouse works too. Press F to toggle full screen.</p>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
@@ -166,10 +166,12 @@ async function initModel(){
     status='';
   }catch(e){status='Pose model failed to load (mouse and keyboard mode)';console.error(e);}
 }
-let lastVT=-1;
+let lastVT=-1,detN=0;
 function detect(now){
   if(!camOK||video.readyState<2||video.currentTime===lastVT)return;
-  const hands=handLM&&ES_STATES.includes(state);          // Escape Protocol tracks fingers instead of the body
+  let hands=handLM&&(ES_STATES.includes(state)||HAND_UI.includes(state));   // menus and Escape Protocol track fingers
+  // on menu screens, keep checking the body every other frame until a hand shows up, so pointing still works
+  if(hands&&landmarker&&!ES_STATES.includes(state)&&now/1000-HD.seen>1.5&&(detN++%2))hands=false;
   if(!hands&&!landmarker)return;
   lastVT=video.currentTime;
   if(hands)processHands(handLM.detectForVideo(video,now),now/1000);
@@ -248,7 +250,7 @@ function drawCam(x,y,w,h,label=true){
 /* =====================================================================
    STATE + UI (hand cursor with hover-to-select)
    ===================================================================== */
-let state='menu',stateT=0,lock=.5,exitHold=0,ptr={on:false};
+let state='home',stateT=0,lock=.5,exitHold=0,ptr={on:false};
 let buttons=[],hov={id:null,t:0};
 const mouse={x:-1,y:-1,t:-99};
 const kb={down:false};
@@ -256,19 +258,24 @@ let base=null;
 const cal={samples:[],msg:'',prog:0,ok:false};
 let cdLast=-1;
 
-function go(s){state=s;stateT=0;lock=.6;hov={id:null,t:0};cdLast=-1;
+function go(s){state=s;stateT=0;lock=.6;hov={id:null,t:0};cdLast=-1;fadeT=1;
   if(!s.startsWith('fs'))fsSetPoses(1);
   if(!s.startsWith('es')&&window.speechSynthesis)try{speechSynthesis.cancel();}catch(e){}}
 function addBtn(id,x,y,w,h,on=true,noHand=false){buttons.push({id,x,y,w,h,on,noHand});}
 const inRect=(p,x,y,w,h)=>p.on&&p.x>=x&&p.x<=x+w&&p.y>=y&&p.y<=y+h;
 function pointer(t){
-  if(ES_STATES.includes(state)&&EI.on)return{x:EI.x,y:EI.y,on:true,src:EI.src==='hand'?'pinch':'mouse'};
+  if(EI.on&&EI.src==='hand')return{x:EI.x,y:EI.y,on:true,src:'pinch'};
+  if(ES_STATES.includes(state)&&EI.on)return{x:EI.x,y:EI.y,on:true,src:'mouse'};
   if(t-mouse.t<4)return{x:mouse.x,y:mouse.y,on:true,src:'mouse'};
   if(camMode()&&tracked(t)&&P.curOk)return{x:clamp(P.cur.x,0,1)*W,y:clamp(P.cur.y,0,1)*H,on:true,src:'hand'};
   return{on:false};
 }
 function updateUI(dt,t){
   ptr=pointer(t);
+  if(ptr.on)lastActive=t;
+  const hb=ptr.on?btnAt(ptr,ptr.src==='pinch'?24:0):null,hid=hb&&state!=='home'?hb.id:null;
+  if(hid&&hid!==hoverId)beep(1500,.025,'sine',.025);           // soft tick when the cursor lands on something
+  hoverId=hid;
   if(ptr.src==='pinch'){hov={id:null,t:0};return;}       // pinch clicks instead of hovering
   let h=null;
   if(ptr.on)for(const b of buttons)if(b.on&&!(b.noHand&&ptr.src==='hand')&&inRect(ptr,b.x,b.y,b.w,b.h)){h=b;break;}
@@ -291,6 +298,7 @@ function press(id){
   else if(id==='es:again')esStart(ES.story);
   else if(id==='es:skip')showOutro('esresult');
   else if(id==='outro:next')go(outroNext);
+  else if(id==='home:go')go('menu');
   else if(id==='menu')go('menu');
 }
 function startFlow(){
@@ -416,45 +424,22 @@ function updateCalib(dt,t){
    DRAWING: shared
    ===================================================================== */
 const stars=Array.from({length:110},()=>({x:Math.random()*W,y:Math.random()*H,r:rand(.8,2.6),s:rand(4,16)}));
-function bgSpace(t){
-  const g=ctx.createLinearGradient(0,0,0,H);g.addColorStop(0,'#040a15');g.addColorStop(1,'#0b1c38');
-  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
-  ctx.strokeStyle='rgba(53,224,255,.055)';ctx.lineWidth=1;ctx.beginPath();
-  for(let x=0;x<=W;x+=60){ctx.moveTo(x,0);ctx.lineTo(x,H);}
-  for(let y=0;y<=H;y+=60){ctx.moveTo(0,y);ctx.lineTo(W,y);}
-  ctx.stroke();
-  ctx.fillStyle='#bfe9ff';
-  for(const s of stars){const y=(s.y+t*s.s)%H;ctx.globalAlpha=.25+.45*((s.r-.8)/1.8);
-    ctx.beginPath();ctx.arc(s.x,y,s.r,0,7);ctx.fill();}
+const dust=Array.from({length:80},()=>({x:Math.random()*W,y:Math.random()*H,r:Math.random()*1.6+.5,s:Math.random()*14+5,p:Math.random()*6}));
+function bgSpace(t){                                     // shared backdrop: deep graphite, slow gold and blue light, drifting dust
+  const g=ctx.createLinearGradient(0,0,0,H);g.addColorStop(0,'#07090d');g.addColorStop(1,'#0d121c');ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  const blob=(x,y,r,c)=>{const rg=ctx.createRadialGradient(x,y,0,x,y,r);rg.addColorStop(0,c);rg.addColorStop(1,'rgba(0,0,0,0)');ctx.fillStyle=rg;ctx.fillRect(x-r,y-r,2*r,2*r);};
+  blob(W*.22+Math.sin(t*.07)*160,H*.28+Math.cos(t*.05)*80,760,'rgba(207,140,42,.11)');
+  blob(W*.82+Math.cos(t*.06)*140,H*.72+Math.sin(t*.08)*90,820,'rgba(70,120,190,.12)');
+  blob(W*.5,H*1.1,760,'rgba(207,140,42,.07)');
+  ctx.strokeStyle='rgba(255,255,255,.022)';ctx.lineWidth=1;ctx.beginPath();
+  for(let x=0;x<=W;x+=80){ctx.moveTo(x,0);ctx.lineTo(x,H);}for(let y=0;y<=H;y+=80){ctx.moveTo(0,y);ctx.lineTo(W,y);}ctx.stroke();
+  ctx.fillStyle='#ebbd6e';
+  for(const d of dust){const y=((d.y-t*d.s)%H+H)%H;ctx.globalAlpha=.12+.25*(.5+.5*Math.sin(t*1.3+d.p));ctx.beginPath();ctx.arc(d.x+Math.sin(t*.3+d.p)*20,y,d.r,0,7);ctx.fill();}
   ctx.globalAlpha=1;
+  const v=ctx.createRadialGradient(CX,H/2,H*.35,CX,H/2,H*1.05);v.addColorStop(0,'rgba(0,0,0,0)');v.addColorStop(1,'rgba(0,0,0,.55)');ctx.fillStyle=v;ctx.fillRect(0,0,W,H);
 }
 /* small Exit button on the right edge during every game: hold the hand cursor on it, or click it (Esc / M also work) */
 const EXIT_STATES=['calib','countdown','play','fscount','fsplay','rcount','race','esintro','esplay'];
-function drawExitBtn(){
-  if(!EXIT_STATES.includes(state))return;
-  const x=W-150,y=H/2-30,w=140,h=60,hv=inRect(ptr,x,y,w,h);
-  addBtn('menu',x,y,w,h,true);
-  ctx.save();ctx.globalAlpha=hv?1:.6;
-  rr(x,y,w,h,16);ctx.fillStyle='rgba(7,16,34,.85)';ctx.fill();ctx.lineWidth=hv?5:3;ctx.strokeStyle=hv?C.orange:C.dim;ctx.stroke();
-  txt('✕ Exit',x+w/2,y+40,28,C.text,'center',700);
-  const p=prog('menu');if(p>0){rr(x+14,y+h-12,(w-28)*p,6,3);ctx.fillStyle=C.orange;ctx.fill();}
-  ctx.restore();
-}
-function drawCursor(){
-  if(ES_STATES.includes(state)&&EI.on){esCursor();return;}
-  if(!ptr.on)return;
-  const {x,y}=ptr;
-  ctx.save();ctx.lineWidth=6;
-  ctx.strokeStyle='rgba(255,255,255,.35)';ctx.beginPath();ctx.arc(x,y,34,0,7);ctx.stroke();
-  if(hov.id){ctx.strokeStyle=C.orange;ctx.beginPath();ctx.arc(x,y,34,-Math.PI/2,-Math.PI/2+Math.PI*2*clamp(hov.t/CFG.dwell,0,1));ctx.stroke();}
-  ctx.fillStyle=hov.id?C.orange:C.cyan;ctx.beginPath();ctx.arc(x,y,12,0,7);ctx.fill();
-  ctx.restore();
-}
-function statusChip(){
-  if(!status)return;
-  rr(W/2-420,H-92,840,56,28);ctx.fillStyle='rgba(255,138,31,.15)';ctx.fill();
-  txt(status,W/2,H-54,28,C.orange,'center',600);
-}
 
 /* =====================================================================
    DRAWING: menu
@@ -514,40 +499,6 @@ function cardArt(kind,cx,cy,t){
     ctx.strokeStyle='#fff';ctx.lineWidth=10;ctx.lineCap='round';ctx.beginPath();ctx.moveTo(-150,120);ctx.lineTo(160,-110);ctx.stroke();
   }
   ctx.restore();
-}
-function drawMenu(t){
-  bgSpace(t);
-  brand(60,125,92);
-  txt(CFG.sub,64,184,30,C.orange,'left',600);
-  const best=loadBest()[0];
-  txt('Best score',W-60,88,26,C.dim,'right',500);txt(best?String(best):'0',W-60,150,64,C.yellow,'right',700);
-  txt('Pick a game: raise a hand and hold the cursor on it',W/2,262,34,C.text,'center',500);
-
-  GAMES.forEach((g,i)=>{
-    const x=56+i*460,y=290,w=430,h=560,id='game:'+g.id;
-    addBtn(id,x,y,w,h,g.ready);
-    const hv=g.ready&&inRect(ptr,x,y,w,h);
-    ctx.save();
-    if(hv){ctx.shadowColor=C.orange;ctx.shadowBlur=44;}
-    rr(x,y,w,h,26);ctx.fillStyle=g.ready?'#0f2342':'#0a1322';ctx.fill();
-    ctx.lineWidth=hv?7:3;ctx.strokeStyle=g.ready?(hv?C.orange:C.cyan):'#243249';ctx.stroke();
-    ctx.restore();
-    ctx.save();ctx.globalAlpha=g.ready?1:.35;ctx.translate(x+w/2,y+160);ctx.scale(.92,.92);cardArt(g.art,0,0,t);ctx.restore();
-    txt(g.title,x+w/2,y+338,42,g.ready?C.text:C.dim,'center',700);
-    txt(g.sub,x+w/2,y+376,26,g.ready?C.orange:'#4c5f7d','center',600);
-    wrap(g.desc,x+w/2,y+420,w-56,22,29,g.ready?'#a9c4e6':'#4c5f7d','center');
-    if(g.ready){
-      const p=prog(id);rr(x+40,y+h-26,w-80,10,5);ctx.fillStyle='rgba(255,255,255,.1)';ctx.fill();
-      if(p>0){rr(x+40,y+h-26,(w-80)*p,10,5);ctx.fillStyle=C.orange;ctx.fill();}
-    }else{
-      ctx.save();ctx.translate(x+w-110,y+56);ctx.rotate(.18);rr(-90,-24,180,46,8);ctx.strokeStyle=C.yellow;ctx.lineWidth=3;ctx.stroke();
-      txt('Coming soon',0,8,26,C.yellow,'center',700);ctx.restore();
-    }
-  });
-  drawCam(40,H-170,240,135);
-  if(status)statusChip();
-  else if(camMode()&&!tracked(t))txt('Step in front of the screen and raise your hand',W/2,H-60,32,C.orange,'center',600);
-  else if(!camMode())txt('Mouse mode: hover a game for a moment, or click it',W/2,H-60,30,C.dim,'center',500);
 }
 
 /* =====================================================================
@@ -761,24 +712,35 @@ function drawCalib(t){
   if(cal.prog>0){rr(CX-300,y+h+110,600*cal.prog,18,9);ctx.fillStyle=C.green;ctx.fill();}
   txt('Hold both hands above your head for 1.5 s to leave',CX,H-40,24,C.dim,'center',500);
 }
+/* one results layout for every game: a glass card with the result, best scores and big pinch buttons */
+function resultCard(o,t){
+  ctx.fillStyle='rgba(7,9,13,.86)';ctx.fillRect(0,0,W,H);
+  const w=980,h=820,x=CX-w/2,y=(H-h)/2;
+  ctx.save();ctx.shadowColor='rgba(0,0,0,.6)';ctx.shadowBlur=80;rr(x,y,w,h,36);
+  const g=ctx.createLinearGradient(0,y,0,y+h);g.addColorStop(0,'rgba(36,40,50,.94)');g.addColorStop(1,'rgba(14,16,22,.97)');ctx.fillStyle=g;ctx.fill();ctx.restore();
+  rr(x,y,w,h,36);ctx.lineWidth=1.5;ctx.strokeStyle='rgba(235,189,110,.35)';ctx.stroke();
+  ctx.fillStyle=UI.gold;ctx.fillRect(CX-30,y+44,60,2);
+  utxt(o.kicker,CX,y+92,16,UI.goldL,'center',700,8);
+  utxt(o.title,CX,y+170,62,o.good===false?'#f0a07a':UI.ivory,'center',700);
+  utxt(o.label,CX,y+246,15,UI.mute,'center',700,6);
+  utxt(o.value,CX,y+360,128,UI.ivory,'center',300);
+  if(o.note)utxt(o.note,CX,y+418,24,o.best?UI.goldL:UI.mute,'center',600,1);
+  if(o.list&&o.list.length){
+    utxt(o.listTitle,CX,y+482,13,UI.faint,'center',700,6);
+    const n=Math.min(5,o.list.length),cw=150,x0=CX-(n*cw+(n-1)*12)/2;
+    o.list.slice(0,5).forEach((s,i)=>{const cx=x0+i*(cw+12);pill(cx,y+502,cw,48,i===o.hi?'rgba(235,189,110,.8)':'rgba(255,255,255,.14)',i===o.hi?'rgba(207,140,42,.18)':'rgba(255,255,255,.035)');
+      utxt(`#${i+1}   ${s}`,cx+cw/2,y+534,19,i===o.hi?UI.goldL:UI.ivory,'center',600);});
+  }else if(o.listTitle)utxt(o.empty||'',CX,y+530,20,UI.mute,'center',500);
+  const bs=o.btns,bw=bs.length>2?290:400,gap=24,bx0=CX-(bs.length*bw+(bs.length-1)*gap)/2;
+  bs.forEach(([id,label,primary,noHand],i)=>rcBtn(id,label,bx0+i*(bw+gap),y+h-180,bw,112,true,primary,noHand));
+  utxt(o.hint||'Point at a button and pinch',CX,y+h-34,16,UI.faint,'center',600,3);
+}
 function drawOver(t){
   drawScene(t);
-  ctx.fillStyle='rgba(3,8,18,.78)';ctx.fillRect(0,0,W,H);
-  txt(R.over||'Shift over',CX,230,92,R.over==='Shift complete'?C.green:C.orange,'center',700);
-  txt('Score',CX,330,32,C.dim,'center',500);txt(String(R.score),CX,430,130,C.text,'center',700);
-  txt(`${Math.floor(R.pos)} m run   ·   ${R.gears} gears`,CX,490,34,C.yellow,'center',600);
-  const b=R.best.length?R.best:loadBest();
-  txt('Top scores',CX,570,28,C.dim,'center',500);
-  b.slice(0,5).forEach((s,i)=>txt(`${i+1}.  ${s}`,CX,612+i*38,30,s===R.score&&i===b.indexOf(R.score)?C.yellow:C.text,'center',600));
-  [['again','Play again',CX-440],['menu','Back to menu',CX+40]].forEach(([id,label,x])=>{
-    const y=840,w=400,h=130,hv=inRect(ptr,x,y,w,h);addBtn(id,x,y,w,h,true);
-    ctx.save();if(hv){ctx.shadowColor=C.orange;ctx.shadowBlur=36;}
-    rr(x,y,w,h,22);ctx.fillStyle=id==='again'?'rgba(255,138,31,.18)':'rgba(53,224,255,.1)';ctx.fill();
-    ctx.lineWidth=hv?7:4;ctx.strokeStyle=id==='again'?C.orange:C.cyan;ctx.stroke();ctx.restore();
-    txt(label,x+w/2,y+80,46,C.text,'center',700);
-    const p=prog(id);if(p>0){rr(x+30,y+h-24,(w-60)*p,10,5);ctx.fillStyle=C.orange;ctx.fill();}
-  });
-  drawCam(40,H-250,350,197);
+  const b=R.best.length?R.best:loadBest(),hi=b.indexOf(R.score);
+  resultCard({kicker:'MAKER RUN',title:R.over||'Shift over',good:R.over==='Shift complete',label:'SCORE',value:String(R.score),
+    note:hi===0?'New best score!':`${Math.floor(R.pos)} m run  ·  ${R.gears} gears`,best:hi===0,listTitle:'TOP SCORES',list:b,hi,
+    btns:[['again','Play again',true,true],['menu','Back to menu',false]]},t);
 }
 
 /* =====================================================================
@@ -1394,33 +1356,28 @@ function rcDrawLobby(t){
   if(rc.best)txt(`Fastest lap  ${fmtT(rc.best.t)}  (${rc.best.name})`,730,1020,26,C.yellow,'left',600);
   drawCam(W-310,36,260,146,false);
 }
-function rcBtn(id,label,x,y,w,h,on,primary,noHand=false){
-  addBtn(id,x,y,w,h,on,noHand);
-  const hv=on&&!(noHand&&ptr.src==='hand')&&inRect(ptr,x,y,w,h);
-  ctx.save();if(hv){ctx.shadowColor=C.orange;ctx.shadowBlur=36;}
-  rr(x,y,w,h,22);ctx.fillStyle=primary?'rgba(255,138,31,.18)':'rgba(53,224,255,.1)';ctx.fill();
-  ctx.lineWidth=hv?7:4;ctx.strokeStyle=primary?C.orange:C.cyan;ctx.stroke();ctx.restore();
-  ctx.font=`700 44px ${FONT}`;const fit=Math.min(44,44*(w-50)/ctx.measureText(label).width);
-  txt(label,x+w/2,y+h/2+fit*.36,fit,on?C.text:C.dim,'center',700);
-  const p=prog(id);if(p>0){rr(x+30,y+h-24,(w-60)*p,10,5);ctx.fillStyle=C.orange;ctx.fill();}
-}
 function rcDrawResults(t){
   bgSpace(t);
-  txt('Race results',CX,150,84,C.text,'center',700);
+  ctx.fillStyle=UI.gold;ctx.fillRect(CX-30,70,60,2);
+  utxt('CIRCUIT RACERS',CX,118,16,UI.goldL,'center',700,8);
+  utxt('Race results',CX,190,62,UI.ivory,'center',700);
   const r=rc.cars.slice().sort((a,b)=>a.pos-b.pos);
   r.forEach((c,i)=>{
-    const y=220+i*86,x=CX-560,w=1120;
-    rr(x,y,w,74,16);ctx.fillStyle=c.human?'rgba(255,210,63,.14)':'rgba(15,35,66,.9)';ctx.fill();ctx.lineWidth=c.human?4:2;ctx.strokeStyle=c.human?c.color:'#243249';ctx.stroke();
-    txt(ORD[i]||(i+1)+'th',x+30,y+52,40,i===0?C.yellow:C.text,'left',700);
-    ctx.fillStyle=c.color;ctx.beginPath();ctx.arc(x+190,y+37,14,0,7);ctx.fill();
-    txt(c.name+(c.human?'':'  (CPU)'),x+220,y+50,34,C.text,'left',600);
+    const y=230+i*84,x=CX-560,w=1120;
+    rr(x,y,w,70,35);ctx.fillStyle=c.human?'rgba(207,140,42,.12)':'rgba(255,255,255,.04)';ctx.fill();
+    ctx.lineWidth=1.5;ctx.strokeStyle=c.human?'rgba(235,189,110,.6)':'rgba(255,255,255,.1)';ctx.stroke();
+    utxt(ORD[i]||(i+1)+'th',x+40,y+46,30,i===0?UI.goldL:UI.ivory,'left',700);
+    ctx.fillStyle=c.color;ctx.beginPath();ctx.arc(x+190,y+35,11,0,7);ctx.fill();
+    utxt(c.name,x+220,y+45,28,UI.ivory,'left',600);
+    if(!c.human)utxt('CPU',x+220+ctx.measureText(c.name).width+18,y+43,13,UI.faint,'left',700,4);
     const best=c.lapTimes.length?Math.min(...c.lapTimes):null;
-    if(best!==null)txt('best lap '+fmtT(best),x+w-300,y+48,22,C.dim,'right',500);
-    txt(c.finished?fmtT(c.finT):'DNF',x+w-30,y+52,36,c.finished?C.yellow:C.dim,'right',700);
+    if(best!==null)utxt('best lap  '+fmtT(best),x+w-280,y+44,17,UI.mute,'right',500,1);
+    utxt(c.finished?fmtT(c.finT):'DNF',x+w-40,y+46,28,c.finished?UI.goldL:UI.faint,'right',600);
   });
-  rcBtn('rc:again','Race again',CX-640,830,380,130,true,true,true);
-  rcBtn('rc:lobby','Change players',CX-190,830,380,130,true,false);
-  rcBtn('menu','Back to menu',CX+260,830,380,130,true,false);
+  rcBtn('rc:again','Race again',CX-640,840,380,112,true,true,true);
+  rcBtn('rc:lobby','Change players',CX-190,840,380,112,true,false);
+  rcBtn('menu','Back to menu',CX+260,840,380,112,true,false);
+  utxt('Point at a button and pinch',CX,1010,16,UI.faint,'center',600,3);
 }
 function rcDraw(t){
   if(state==='lobby')rcDrawLobby(t);
@@ -1656,31 +1613,10 @@ function drawSlice(t){
 function fsDraw(t){
   if(state==='fsover'){
     drawSlice(t);
-    ctx.fillStyle='rgba(3,8,18,.84)';ctx.fillRect(0,0,W,H);
-    const act=fsActive().slice().sort((a,b)=>b.score-a.score);
-    if(act.length>1){
-      const tie=act[0].score===act[1].score;
-      txt(tie?'It\'s a tie!':`Player ${act[0].i+1} wins!`,CX,200,92,tie?C.yellow:act[0].col,'center',700);
-      act.forEach((p,i)=>{
-        const y=270+i*110,x=CX-420;
-        rr(x,y,840,92,18);ctx.fillStyle='rgba(15,35,66,.9)';ctx.fill();ctx.lineWidth=4;ctx.strokeStyle=p.col;ctx.stroke();
-        txt(`${i+1}.`,x+30,y+62,44,i===0?C.yellow:C.text,'left',700);
-        txt(`Player ${p.i+1}`,x+110,y+60,38,p.col,'left',700);
-        txt(`${p.sliced} sliced`,x+520,y+58,26,C.dim,'right',500);
-        txt(String(p.score),x+810,y+64,54,C.text,'right',700);
-      });
-    }else{
-      const p=act[0];
-      txt(p.out?'Nozzle burn!':'Print complete',CX,220,92,p.out?C.orange:C.green,'center',700);
-      txt('Score',CX,320,32,C.dim,'center',500);txt(String(p.score),CX,420,130,C.text,'center',700);
-      if(S.newBest)txt('New best!',CX,480,40,C.yellow,'center',700);
-      else txt(`${p.sliced} parts sliced`,CX,480,32,C.yellow,'center',600);
-      const b=fsBest();txt('Top scores',CX,560,28,C.dim,'center',500);
-      b.slice(0,5).forEach((s,i)=>txt(`${i+1}.  ${s}`,CX,602+i*38,30,s===p.score&&i===b.indexOf(p.score)?C.yellow:C.text,'center',600));
-    }
-    rcBtn('fs:again','Play again',CX-440,840,400,130,true,true,true);
-    rcBtn('menu','Back to menu',CX+40,840,400,130,true,false);
-    drawCam(40,H-250,350,197);
+    const p=fsActive()[0]||S.players[0],bl=fsBest(),hi=bl.indexOf(p.score);
+    resultCard({kicker:'FILAMENT SLICE',title:p.out?'Nozzle burn':'Print complete',good:!p.out,label:'SCORE',value:String(p.score),
+      note:S.newBest?'New best score!':`${p.sliced} parts sliced`,best:S.newBest,listTitle:'TOP SCORES',list:bl,hi,
+      btns:[['fs:again','Play again',true,true],['menu','Back to menu',false]]},t);
     return;
   }
   drawSlice(t);
@@ -1736,16 +1672,6 @@ function processHands(res,t){
   const mx=1-(lm[4].x+lm[8].x)/2,my=(lm[4].y+lm[8].y)/2;                     // pinch point, mirrored
   HD.x=HD.fx.f(clamp((mx-.22)/.56,0,1),t)*W;                                // the middle of the camera view covers the whole screen
   HD.y=HD.fy.f(clamp((my-.12)/.6,0,1),t)*H;
-}
-function esInput(t){
-  const prev=EI.down,handOn=HD.ok&&t-HD.seen<.5;
-  if(mouseDown||t-mouse.t<3){EI.x=mouse.x;EI.y=mouse.y;EI.on=true;EI.down=mouseDown;EI.src='mouse';}
-  else if(handOn){EI.x=HD.x;EI.y=HD.y;EI.on=true;EI.down=HD.pinch;EI.src='hand';}
-  else{EI.on=false;EI.down=false;EI.src='none';}
-  EI.pressed=EI.down&&!prev;EI.released=!EI.down&&prev;
-  if(EI.pressed&&EI.src==='hand'&&lock<=0){                                  // pinch works as a click on any button
-    for(const b of buttons)if(b.on&&inRect({on:true,x:EI.x,y:EI.y},b.x,b.y,b.w,b.h)){press(b.id);EI.pressed=false;break;}
-  }
 }
 
 /* ---------------- the three missions ---------------- */
@@ -2067,7 +1993,6 @@ function drawKeypad(P,t){
 
 /* ---------------- update ---------------- */
 function esUpdate(dt,t){
-  esInput(t);
   ES.lt+=dt;const L=ES.lines[ES.li];
   if(L&&ES.li<ES.lines.length-1&&ES.lt>L.length/34+1.4){ES.li++;ES.lt=0;}
   ES.shake=Math.max(0,ES.shake-dt);ES.flash=Math.max(0,ES.flash-dt*1.6);
@@ -2272,18 +2197,12 @@ function esDrawEnd(t){
   if(stateT>2)rcBtn('es:skip','Continue',W-360,60,300,90,true,false);
 }
 function esDrawResult(t){
-  const S0=esS();esBg(ES.story,t,false);ctx.fillStyle='rgba(3,8,18,.8)';ctx.fillRect(0,0,W,H);
-  txt(S0.name+'  ·  '+S0.title,CX,140,44,S0.col,'center',700);
-  txt(ES.won?'ESCAPED':'MISSION FAILED',CX,250,110,ES.won?C.green:C.red,'center',700);
-  txt(ES.won?`Time left  ${fmtMS(ES.left)}`:'The clock beat you this time',CX,330,40,C.text,'center',600);
-  if(ES.newBest)txt('New best escape!',CX,390,36,C.yellow,'center',700);
-  const b=esBestAll()[S0.id]||[];txt('Best escapes (time left)',CX,470,28,C.dim,'center',500);
-  if(!b.length)txt('Nobody yet. Be the first!',CX,520,30,C.text,'center',600);
-  b.slice(0,5).forEach((s,i)=>txt(`${i+1}.  ${fmtMS(s)}`,CX,520+i*42,32,i===0?C.yellow:C.text,'center',600));
-  rcBtn('es:again','Play again',CX-660,840,400,130,true,true);
-  rcBtn('es:pick','Other mission',CX-200,840,400,130,true,false);
-  rcBtn('menu','Back to menu',CX+260,840,400,130,true,false);
-  esHandView(40,H-160,230,130);
+  const S0=esS();esBg(ES.story,t,false);
+  const b=(esBestAll()[S0.id]||[]).map(fmtMS),hi=ES.won?b.indexOf(fmtMS(ES.left)):-1;
+  resultCard({kicker:(S0.name+'  ·  '+S0.title).toUpperCase(),title:ES.won?'Mission complete':'Mission failed',good:ES.won,
+    label:ES.won?'TIME LEFT':'TIME',value:ES.won?fmtMS(ES.left):'00:00',note:ES.newBest?'New best escape!':ES.won?'You made it out.':'The clock beat you this time.',best:ES.newBest,
+    listTitle:'BEST ESCAPES',list:b,hi,empty:'Nobody has escaped yet. Be the first!',
+    btns:[['es:again','Play again',true],['es:pick','Other mission',false],['menu','Back to menu',false]]},t);
 }
 function esDraw(t){
   if(state==='esmenu')esDrawMenu(t);
@@ -2369,13 +2288,212 @@ function drawOutro(t){
 }
 
 /* =====================================================================
+   VISITOR SHELL: pinch to select everywhere, welcome screen, menu and the
+   shared look (gold on deep graphite, matching the SPACElogic logo).
+   ===================================================================== */
+const FONT_UI="'Manrope','Chakra Petch',system-ui,sans-serif";
+const UI={gold:'#cf8c2a',goldL:'#ebbd6e',ivory:'#f4efe6',mute:'#9aa0a9',faint:'#5d636c',glass:'rgba(255,255,255,.05)',line:'rgba(255,255,255,.12)'};
+const HAND_UI=['home','menu','over','fsover','lobby','rresult','outro'];       // screens driven by the hand + pinch
+function utxt(s,x,y,size,col=UI.ivory,align='left',weight=600,ls=0){
+  ctx.font=`${weight} ${size}px ${FONT_UI}`;ctx.letterSpacing=ls+'px';ctx.fillStyle=col;ctx.textAlign=align;ctx.textBaseline='alphabetic';
+  ctx.fillText(s,x,y);ctx.letterSpacing='0px';
+}
+function uwrap(s,x,y,maxW,size,lh,col,align='left',weight=500){
+  ctx.font=`${weight} ${size}px ${FONT_UI}`;const words=s.split(' ');let line='';
+  for(const w of words){const t2=line?line+' '+w:w;if(ctx.measureText(t2).width>maxW&&line){utxt(line,x,y,size,col,align,weight);y+=lh;line=w;}else line=t2;}
+  if(line)utxt(line,x,y,size,col,align,weight);return y;
+}
+const ripples=[];let fadeT=0,hoverId=null,lastActive=0;
+
+/* one input for every screen: mouse, or the tracked hand (pinch = press) */
+function uiInput(t,dt){
+  const prev=EI.down,handOn=HD.ok&&t-HD.seen<.5;
+  if(mouseDown||t-mouse.t<3){EI.x=mouse.x;EI.y=mouse.y;EI.on=true;EI.down=mouseDown;EI.src='mouse';}
+  else if(handOn){EI.x=HD.x;EI.y=HD.y;EI.on=true;EI.down=HD.pinch;EI.src='hand';}
+  else{EI.on=false;EI.down=false;EI.src='none';}
+  EI.pressed=EI.down&&!prev;EI.released=!EI.down&&prev;
+  if(EI.pressed&&EI.on)ripples.push({x:EI.x,y:EI.y,t:0});
+  for(const r of ripples)r.t+=dt;while(ripples.length&&ripples[0].t>.6)ripples.shift();
+  if(EI.pressed&&EI.src==='hand'&&lock<=0){
+    const b=btnAt(EI,24);
+    if(b){press(b.id);EI.pressed=false;}
+    else if(state==='home'){press('home:go');EI.pressed=false;}
+  }
+}
+function btnAt(p,pad=0){for(const b of buttons)if(b.on&&p.x>=b.x-pad&&p.x<=b.x+b.w+pad&&p.y>=b.y-pad&&p.y<=b.y+b.h+pad)return b;return null;}
+
+function drawPinchGlyph(x,y,s,ph,col){                   // two fingertips closing together, ph 0..1
+  ctx.save();ctx.translate(x,y);ctx.scale(s,s);ctx.lineCap='round';ctx.strokeStyle=col;
+  const gap=22*(1-ph);
+  ctx.lineWidth=13;ctx.beginPath();ctx.moveTo(-46,-44);ctx.quadraticCurveTo(-36,-8,-8-gap*.5,-4-gap*.6);ctx.stroke();   // index finger
+  ctx.beginPath();ctx.moveTo(-40,46);ctx.quadraticCurveTo(-10,30,-4+gap*.5,4+gap*.6);ctx.stroke();                       // thumb
+  ctx.lineWidth=13;ctx.globalAlpha=.35;ctx.beginPath();ctx.moveTo(-46,-44);ctx.quadraticCurveTo(-70,0,-40,46);ctx.stroke();ctx.globalAlpha=1;
+  if(ph>.8){ctx.fillStyle=UI.goldL;ctx.shadowColor=UI.gold;ctx.shadowBlur=20;ctx.beginPath();ctx.arc(-6,0,9,0,7);ctx.fill();
+    ctx.shadowBlur=0;ctx.strokeStyle=UI.goldL;ctx.lineWidth=3;for(let k=0;k<6;k++){const a=k*Math.PI/3;ctx.beginPath();ctx.moveTo(-6+Math.cos(a)*16,Math.sin(a)*16);ctx.lineTo(-6+Math.cos(a)*24,Math.sin(a)*24);ctx.stroke();}}
+  ctx.restore();
+}
+function drawMirror(cx,cy,r,label=true){                   // round live camera view
+  ctx.save();ctx.beginPath();ctx.arc(cx,cy,r,0,7);ctx.clip();ctx.fillStyle='#0b0e14';ctx.fillRect(cx-r,cy-r,2*r,2*r);
+  if(camOK&&video.readyState>=2){const vw=r*2*16/9;ctx.save();ctx.translate(cx+vw/2,cy-r);ctx.scale(-1,1);ctx.globalAlpha=.85;ctx.drawImage(video,0,0,vw,r*2);ctx.restore();}
+  if(HD.lm&&performance.now()/1000-HD.seen<.5){
+    const vw=r*2*16/9,pt=i=>[cx+vw/2-HD.lm[i].x*vw,cy-r+HD.lm[i].y*r*2];
+    ctx.strokeStyle=UI.goldL;ctx.lineWidth=2;
+    for(const f of [[0,1,2,3,4],[0,5,6,7,8],[5,9,10,11,12],[9,13,14,15,16],[13,17,18,19,20],[0,17]]){ctx.beginPath();for(const i of f){const p=pt(i);ctx.lineTo(p[0],p[1]);}ctx.stroke();}
+  }
+  ctx.restore();
+  const handOn=HD.ok&&performance.now()/1000-HD.seen<.5;
+  ctx.save();ctx.shadowColor=handOn?UI.gold:'transparent';ctx.shadowBlur=handOn?24:0;
+  ctx.lineWidth=3;ctx.strokeStyle=handOn?UI.goldL:'rgba(255,255,255,.25)';ctx.beginPath();ctx.arc(cx,cy,r,0,7);ctx.stroke();ctx.restore();
+  if(label){
+    const s=!camOK?'Mouse mode':handOn?(HD.pinch?'Pinch':'Hand found'):handLM?'Show your hand':'Starting camera…';
+    utxt(s,cx,cy+r+30,17,handOn?UI.goldL:UI.mute,'center',700,2);
+  }
+}
+function pill(x,y,w,h,col,fill){rr(x,y,w,h,h/2);ctx.fillStyle=fill;ctx.fill();ctx.lineWidth=1.5;ctx.strokeStyle=col;ctx.stroke();}
+
+/* ---------------- welcome / attract screen ---------------- */
+const SHOWCASE=['Maker Run','Circuit Racers','Escape Protocol','Filament Slice'];
+function drawHome(t){
+  bgSpace(t);
+  addBtn('home:go',0,0,W,H,true);                         // pinch, click or point anywhere
+  const a=clamp(stateT/1.2,0,1);
+  ctx.globalAlpha=a;
+  utxt('WELCOME TO',CX,250,24,UI.mute,'center',600,14);
+  const g=ctx.createRadialGradient(CX,370,40,CX,370,520);g.addColorStop(0,'rgba(207,140,42,.16)');g.addColorStop(1,'rgba(207,140,42,0)');ctx.fillStyle=g;ctx.fillRect(CX-520,0,1040,760);
+  const bw=brandW(150);brand(CX-bw/2,440,150);
+  utxt('INTERACTIVE  EXPERIENCE  LAB',CX,520,22,UI.goldL,'center',700,10);
+  ctx.globalAlpha=clamp((stateT-.6)/1,0,1);
+  // call to action: animated pinch inside a breathing ring
+  const ph=(Math.sin(t*2.6)+1)/2,cy=700;
+  ctx.save();ctx.strokeStyle='rgba(235,189,110,.25)';ctx.lineWidth=2;for(let i=0;i<3;i++){const r=78+((t*40+i*30)%90);ctx.globalAlpha*=1;ctx.beginPath();ctx.arc(CX,cy,r,0,7);ctx.stroke();}ctx.restore();
+  ctx.fillStyle='rgba(255,255,255,.04)';ctx.beginPath();ctx.arc(CX,cy,74,0,7);ctx.fill();
+  ctx.strokeStyle=UI.goldL;ctx.lineWidth=2;ctx.beginPath();ctx.arc(CX,cy,74,0,7);ctx.stroke();
+  drawPinchGlyph(CX+12,cy,.95,ph,UI.ivory);
+  utxt('Raise your hand and pinch to begin',CX,cy+140,40,UI.ivory,'center',600);
+  utxt(camOK?'Stand about 1.5 metres from the screen  ·  thumb and index finger together':'Click anywhere to begin',CX,cy+184,22,UI.mute,'center',500,1);
+  // games strip
+  const sel=Math.floor(t/2.2)%4;
+  SHOWCASE.forEach((n,i)=>{const x=CX+(i-1.5)*300,on=i===sel;utxt(n.toUpperCase(),x,H-62,16,on?UI.goldL:UI.faint,'center',700,5);
+    if(on){ctx.fillStyle=UI.gold;ctx.fillRect(x-20,H-48,40,2);}});
+  ctx.globalAlpha=1;
+  utxt('PRESENTED BY',150,H-170,13,UI.mute,'center',700,5);drawMakerLogo(150,H-90,.36);
+  drawMirror(W-170,H-190,110);
+  if(status){utxt(status,CX,40,20,UI.goldL,'center',600,1);}
+}
+
+/* ---------------- the game menu ---------------- */
+const GAME_META={
+  runner:{cat:'FULL BODY',meta:'1 player  ·  75 seconds',blurb:'Lean, jump and duck through the workshop. Grab every gear you can.'},
+  racer:{cat:'PHONE AS STEERING WHEEL',meta:'1 to 4 players  ·  3 laps',blurb:'Scan the QR code and steer with your phone. Race friends and CPU cars.'},
+  escape:{cat:'HAND GESTURES',meta:'1 player  ·  5 minutes',blurb:'Pick a mission, find the clues and crack the code before time runs out.'},
+  slice:{cat:'FULL BODY',meta:'1 player  ·  75 seconds',blurb:'Slice flying spools and circuit boards. Stay clear of the hot nozzles.'}};
+const cardHv=[0,0,0,0];let menuLastT=0;
+function drawMenu(t){
+  const dt=Math.min(.05,t-menuLastT);menuLastT=t;
+  bgSpace(t);
+  brand(86,128,60);
+  utxt('MAKER SPACE ARCADE',W-86,100,17,UI.goldL,'right',700,8);
+  const handOn=HD.ok&&t-HD.seen<.5;
+  utxt(handOn?'Hand detected  ·  point and pinch to choose':camOK?'Raise one hand, then pinch to choose':'Click a game to play',W-86,132,18,handOn?UI.ivory:UI.mute,'right',500,1);
+  utxt('Choose your experience',CX,258,56,UI.ivory,'center',300,1);
+  const cw=410,ch=590,gap=36,x0=(W-(4*cw+3*gap))/2,y0=300;
+  GAMES.forEach((g,i)=>{
+    const id='game:'+g.id,x=x0+i*(cw+gap);
+    addBtn(id,x,y0,cw,ch,true);
+    const over=ptr.on&&inRect(ptr,x-8,y0-8,cw+16,ch+16);
+    cardHv[i]+=((over?1:0)-cardHv[i])*Math.min(1,dt*10);
+    const hv=cardHv[i],y=y0-hv*14,m=GAME_META[g.id];
+    ctx.save();
+    ctx.shadowColor=`rgba(207,140,42,${.45*hv})`;ctx.shadowBlur=60*hv;ctx.shadowOffsetY=10*hv;
+    rr(x,y,cw,ch,28);const cg=ctx.createLinearGradient(0,y,0,y+ch);cg.addColorStop(0,'rgba(34,38,48,.92)');cg.addColorStop(1,'rgba(16,18,24,.96)');ctx.fillStyle=cg;ctx.fill();
+    ctx.restore();
+    // art panel
+    ctx.save();ctx.beginPath();ctx.roundRect(x+14,y+14,cw-28,300,20);ctx.clip();
+    const ag=ctx.createRadialGradient(x+cw/2,y+150,20,x+cw/2,y+170,320);ag.addColorStop(0,`rgba(40,70,110,${.55+.25*hv})`);ag.addColorStop(1,'rgba(8,10,16,1)');
+    ctx.fillStyle=ag;ctx.fillRect(x+14,y+14,cw-28,300);
+    ctx.globalAlpha=.85+.15*hv;ctx.translate(x+cw/2,y+165);const s=.82+.06*hv;ctx.scale(s,s);cardArt(g.art,0,0,t);
+    ctx.restore();
+    rr(x,y,cw,ch,28);ctx.lineWidth=1.5+hv;ctx.strokeStyle=hv>.05?`rgba(235,189,110,${.35+.6*hv})`:UI.line;ctx.stroke();
+    utxt(m.cat,x+34,y+356,14,UI.goldL,'left',700,4);
+    utxt(g.title,x+34,y+404,38,UI.ivory,'left',700);
+    uwrap(m.blurb,x+34,y+442,cw-68,19,27,UI.mute,'left',500);
+    utxt(m.meta,x+34,y+ch-86,15,UI.faint,'left',600,1);
+    // call to action
+    const bx=x+34,by=y+ch-64,bwid=cw-68,bh=44;
+    rr(bx,by,bwid,bh,23);
+    if(hv>.05){const gg=ctx.createLinearGradient(bx,0,bx+bwid,0);gg.addColorStop(0,'#e3a548');gg.addColorStop(1,'#c9822a');ctx.globalAlpha=hv;ctx.fillStyle=gg;ctx.fill();ctx.globalAlpha=1;}
+    ctx.lineWidth=1.5;ctx.strokeStyle=hv>.05?'rgba(255,230,180,.8)':'rgba(255,255,255,.18)';ctx.stroke();
+    const lab=ptr.src==='pinch'||!camOK||ptr.src==='mouse'?(ptr.src==='mouse'?'Click to play':'Pinch to play'):'Hold to play';
+    utxt(lab,bx+bwid/2,by+29,17,hv>.5?'#1d1406':UI.ivory,'center',700,2);
+    const p=prog(id);if(p>0){rr(bx,by+bh+8,bwid*p,4,2);ctx.fillStyle=UI.goldL;ctx.fill();}
+  });
+  drawMirror(118,H-112,62,false);
+  drawPinchGlyph(CX-352,H-58,.36,(Math.sin(t*2.6)+1)/2,UI.goldL);
+  utxt('Point at a game, then pinch your thumb and index finger',CX+10,H-52,22,UI.mute,'center',500,1);
+  utxt('PRESENTED BY  MAKER SPACE',W-86,H-52,13,UI.faint,'right',700,5);
+  if(status)statusChip();
+}
+
+/* ---------------- shared pieces, restyled ---------------- */
+function rcBtn(id,label,x,y,w,h,on,primary,noHand=false){
+  addBtn(id,x,y,w,h,on,noHand);
+  const hv=on&&!(noHand&&ptr.src==='hand')&&ptr.on&&inRect(ptr,x-10,y-10,w+20,h+20);
+  const r=Math.min(36,h/2);
+  ctx.save();ctx.translate(0,hv?-3:0);
+  if(hv){ctx.shadowColor='rgba(207,140,42,.55)';ctx.shadowBlur=40;}
+  rr(x,y,w,h,r);
+  if(primary&&on){const g=ctx.createLinearGradient(x,y,x,y+h);g.addColorStop(0,'#e7ad55');g.addColorStop(1,'#c27c25');ctx.fillStyle=g;}
+  else ctx.fillStyle=hv?'rgba(255,255,255,.1)':'rgba(255,255,255,.055)';
+  ctx.fill();ctx.shadowBlur=0;
+  ctx.lineWidth=hv?2.5:1.5;ctx.strokeStyle=primary&&on?'rgba(255,232,190,.9)':hv?UI.goldL:'rgba(255,255,255,.22)';ctx.stroke();
+  const size=Math.min(34,h*.3);ctx.font=`700 ${size}px ${FONT_UI}`;const fit=Math.min(size,size*(w-60)/Math.max(1,ctx.measureText(label).width));
+  utxt(label,x+w/2,y+h/2+fit*.36,fit,!on?UI.faint:primary?'#1d1406':UI.ivory,'center',700,.5);
+  const p=prog(id);if(p>0){rr(x+r,y+h-10,(w-2*r)*p,4,2);ctx.fillStyle=primary?'#1d1406':UI.goldL;ctx.fill();}
+  ctx.restore();
+}
+function drawExitBtn(){
+  if(!EXIT_STATES.includes(state))return;
+  const x=W-150,y=H/2-28,w=130,h=56,hv=ptr.on&&inRect(ptr,x-10,y-10,w+20,h+20);
+  addBtn('menu',x,y,w,h,true);
+  ctx.save();ctx.globalAlpha=hv?1:.7;
+  rr(x,y,w,h,28);ctx.fillStyle='rgba(10,12,18,.82)';ctx.fill();ctx.lineWidth=hv?2.5:1.5;ctx.strokeStyle=hv?UI.goldL:'rgba(255,255,255,.25)';ctx.stroke();
+  utxt('✕  Exit',x+w/2,y+36,20,UI.ivory,'center',700,1);
+  const p=prog('menu');if(p>0){rr(x+20,y+h-9,(w-40)*p,3,1.5);ctx.fillStyle=UI.goldL;ctx.fill();}
+  ctx.restore();
+}
+function statusChip(){
+  if(!status)return;
+  ctx.font=`600 20px ${FONT_UI}`;const w=ctx.measureText(status).width+60;
+  pill(CX-w/2,H-140,w,44,'rgba(235,189,110,.5)','rgba(20,16,10,.8)');utxt(status,CX,H-111,20,UI.goldL,'center',600);
+}
+let curR=30;
+function drawRipples(){
+  for(const r of ripples){ctx.save();ctx.globalAlpha=1-r.t/.6;ctx.strokeStyle=UI.goldL;ctx.lineWidth=3;ctx.beginPath();ctx.arc(r.x,r.y,24+r.t*120,0,7);ctx.stroke();ctx.restore();}
+}
+function drawCursor(){
+  if(ES_STATES.includes(state)&&EI.on){esCursor();drawRipples();return;}
+  if(!ptr.on){drawRipples();return;}
+  const {x,y}=ptr,down=ptr.src==='pinch'&&EI.down,hv=!!hoverId;
+  curR+=((hv?40:28)-curR)*.25;
+  ctx.save();ctx.shadowColor='rgba(207,140,42,.8)';ctx.shadowBlur=hv?24:10;
+  ctx.lineWidth=2.5;ctx.strokeStyle=hv?UI.goldL:'rgba(244,239,230,.75)';ctx.beginPath();ctx.arc(x,y,down?curR*.6:curR,0,7);ctx.stroke();
+  if(hov.id&&ptr.src!=='pinch'){ctx.lineWidth=4;ctx.strokeStyle=UI.gold;ctx.beginPath();ctx.arc(x,y,curR,-Math.PI/2,-Math.PI/2+Math.PI*2*clamp(hov.t/CFG.dwell,0,1));ctx.stroke();}
+  ctx.fillStyle=down?UI.goldL:UI.ivory;ctx.beginPath();ctx.arc(x,y,down?11:6,0,7);ctx.fill();
+  ctx.restore();
+  drawRipples();
+}
+
+/* =====================================================================
    MAIN LOOP
    ===================================================================== */
 function update(dt,t){
   stateT+=dt;lock=Math.max(0,lock-dt);
-  if(state!=='menu'&&state!=='fsplay'&&tracked(t)&&P.bothUp){exitHold+=dt;if(exitHold>1.5){exitHold=0;go('menu');}}
+  if(state!=='menu'&&state!=='home'&&state!=='fsplay'&&tracked(t)&&P.bothUp){exitHold+=dt;if(exitHold>1.5){exitHold=0;go('menu');}}
   else exitHold=Math.max(0,exitHold-dt*2);
+  uiInput(t,dt);
   updateUI(dt,t);
+  fadeT=Math.max(0,fadeT-dt*3);
+  if(state==='menu'&&t-lastActive>45&&stateT>45)go('home');      // nobody around: back to the welcome screen
   if(state==='calib')updateCalib(dt,t);
   else if(state==='countdown'){
     const n=Math.floor(stateT);if(n!==cdLast&&n<=3){cdLast=n;if(n<3)sfx.tick();else sfx.go();}
@@ -2391,7 +2509,8 @@ function update(dt,t){
 function draw(t){
   buttons=[];
   ctx.setTransform(1,0,0,1,0,0);ctx.globalAlpha=1;
-  if(state==='menu')drawMenu(t);
+  if(state==='home')drawHome(t);
+  else if(state==='menu')drawMenu(t);
   else if(state==='calib')drawCalib(t);
   else if(state==='countdown'||state==='play'){
     drawScene(t);
@@ -2413,6 +2532,7 @@ function draw(t){
   else if(ES_STATES.includes(state))esDraw(t);
   else if(state==='outro')drawOutro(t);
   drawExitBtn();
+  if(fadeT>0){ctx.fillStyle=`rgba(7,9,13,${fadeT*fadeT})`;ctx.fillRect(0,0,W,H);}
   drawCursor();
 }
 let last=performance.now();
@@ -2445,7 +2565,8 @@ addEventListener('keydown',e=>{
     else if(e.key==='ArrowRight')R.lane=Math.min(1,R.lane+1);
     else if(e.key==='ArrowUp'||e.key===' '){jump();e.preventDefault();}
     else if(e.key==='ArrowDown')kb.down=true;
-  }else if((e.key==='Enter'||e.key===' ')&&(state==='menu'))press('game:runner');
+  }else if((e.key==='Enter'||e.key===' ')&&state==='home')press('home:go');
+  else if((e.key==='Enter'||e.key===' ')&&(state==='menu'))press('game:runner');
   else if(e.key==='Enter'&&state==='over')press('again');
 });
 addEventListener('keyup',e=>{if(e.key==='ArrowDown')kb.down=false;});
@@ -2470,7 +2591,7 @@ document.getElementById('startBtn').addEventListener('click',async()=>{
   if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
   requestAnimationFrame(frame);
   await initCam();
-  if(camOK)await initModel();
+  if(camOK){await initModel();initHands();}
 });
 </script>
 </body>

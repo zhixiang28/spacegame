@@ -1,6 +1,12 @@
 # SPACElogic Maker Space Arcade
 
-Open `index.html` on the TV (serve it over https, e.g. GitHub Pages) and pick a game.
+Open `index.html` on the TV (serve it over https, e.g. GitHub Pages). Staff press **Start the experience** once; after that visitors run everything themselves.
+
+## Controls for visitors
+- **Pinch to select everywhere**: point with one hand and touch thumb and index finger together to press. Best from about 1 to 1.5 m.
+  If no hand is seen, the older "hold your raised hand on a button" control still works, and the mouse always works.
+- A welcome screen invites people in; after 45 s with nobody around the menu returns to it.
+- During body games (Maker Run, Filament Slice) the camera follows the body; menus and results switch back to hand tracking.
 
 ## Circuit Racers (phones as steering wheels)
 1. Pick **Circuit Racers** on the TV. A QR code appears in the lobby.
