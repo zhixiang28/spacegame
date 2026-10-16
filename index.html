@@ -173,10 +173,23 @@ function detect(now){
   const res=landmarker.detectForVideo(video,now);
   processPose(res.landmarks,now/1000);
 }
+/* the player is whoever stands closest to the middle of the camera view; people watching at the sides are ignored */
+const CENTER_ZONE=.2;      // half-width of the middle zone, as a fraction of the frame
+const poseMid=lm=>(lm[11].x+lm[12].x)/2;
+function centralPose(lms,onlyZone=false){
+  let best=null,bd=9;
+  for(const lm of lms){
+    if((lm[11].visibility??1)<.5||(lm[12].visibility??1)<.5)continue;
+    const d=Math.abs(poseMid(lm)-.5);
+    if(d<bd){bd=d;best=lm;}
+  }
+  if(onlyZone&&bd>CENTER_ZONE)return null;
+  return best||lms[0];
+}
 function processPose(lms,t){
   P.bothUp=false;P.all=lms||[];
   if(!lms||!lms.length){P.ok=false;P.lm=null;return;}
-  const lm=lms[0];P.lm=lm;
+  const lm=centralPose(lms);P.lm=lm;
   const asp=video.videoWidth/video.videoHeight;
   const X=i=>(1-lm[i].x)*asp,Y=i=>lm[i].y,V=i=>lm[i].visibility??1;
   if(V(11)<.5||V(12)<.5){P.ok=false;return;}
@@ -674,7 +687,9 @@ function drawWorld(t){
   }
   if(!playerDrawn)drawPlayer();
 }
+function hudPanel(x,y,w,h){rr(x,y,w,h,18);ctx.fillStyle='rgba(5,11,22,.94)';ctx.fill();ctx.lineWidth=2;ctx.strokeStyle='rgba(53,224,255,.35)';ctx.stroke();}
 function drawHUD(t){
+  hudPanel(30,24,290,200);hudPanel(CX-320,22,640,100);hudPanel(W-440,24,410,118);
   txt('Score',60,66,26,C.dim,'left',500);txt(String(R.score),60,128,70,C.text,'left',700);
   gear(76,178,22,t*2,C.yellow);txt(String(R.gears),112,190,40,C.yellow,'left',700);
   const rem=Math.max(0,CFG.roundSeconds-R.t),bw=560;
@@ -1407,11 +1422,11 @@ addEventListener('keyup',e=>{
 
 /* =====================================================================
    FILAMENT SLICE: swipe both hands (or the mouse) through flying parts.
-   Up to 3 players side by side, each with their own score and lives.
+   One player: the person in the middle of the camera view.
    Slice filament spools and PCBs, avoid the red-hot nozzles.
    ===================================================================== */
 const FS_STATES=['fscount','fsplay','fsover'];
-const FS={grav:1500,minSpeed:850,hit:14,max:3,joinUntil:10,cols:['#35e0ff','#ff8a1f','#4dff9a']};
+const FS={grav:1500,minSpeed:850,hit:14,max:1,detect:3,cols:['#35e0ff']};   // one player; the camera still looks at up to 3 people to find the one in the middle
 const S={t:0,objs:[],frags:[],pops:[],nextWave:.6,flash:0,shake:0,newBest:false,players:[],blades:[]};
 for(let i=0;i<FS.max;i++)for(let k=0;k<2;k++)S.blades.push({pl:i,k,x:0,y:0,px:0,py:0,on:false,pon:false,trail:[],speed:0});
 S.blades.push({pl:0,k:2,x:0,y:0,px:0,py:0,on:false,pon:false,trail:[],speed:0});            // mouse
@@ -1430,7 +1445,7 @@ function resetSlice(){
     active:i===0,out:false,lastSx:null,hands:[null,null]}));
   for(const b of S.blades){b.on=b.pon=false;b.trail.length=0;}
 }
-function startSlice(){resetSlice();fsSetPoses(FS.max);go('fscount');}
+function startSlice(){resetSlice();fsSetPoses(FS.detect);go('fscount');}
 const fsActive=()=>S.players.filter(p=>p.active);
 
 function fsWave(){
@@ -1441,38 +1456,23 @@ function fsWave(){
     S.objs.push({k,x,y:H+90,vx:(W/2-x)*rand(.15,.5)+rand(-150,150),vy:-rand(1500,1850),r:k==='pcb'?80:74,rot:rand(0,6),vr:rand(-4,4),hit:false,seen:false});
   }
 }
-/* find up to 3 people, give each a stable seat (left to right), turn their hands into screen points */
+/* one player: the person standing in the middle of the camera view. Friends watching at the sides are ignored. */
 function fsTrack(t){
-  const pl=S.players;for(const p of pl)p.hands=[null,null];
+  const pl=S.players[0];pl.hands=[null,null];
   if(!camMode()||!P.all||!P.all.length)return;
+  const lm=centralPose(P.all,true);if(!lm)return;
   const asp=video.videoWidth/video.videoHeight;
-  const info=[];
-  for(const lm of P.all){
-    const V=i=>lm[i].visibility??1,X=i=>(1-lm[i].x)*asp,Y=i=>lm[i].y;
-    if(V(11)<.5||V(12)<.5)continue;
-    const sx=(X(11)+X(12))/2,sy=(Y(11)+Y(12))/2,shW=Math.abs(X(11)-X(12));
-    const hips=V(23)>.4&&V(24)>.4,torso=hips?Math.max(.05,Math.hypot(sx-(X(23)+X(24))/2,sy-(Y(23)+Y(24))/2)):shW*1.25;
-    info.push({lm,V,X,Y,sx,sy,shW,torso});
-  }
-  info.sort((a,b)=>a.sx-b.sx);
-  const used=new Set(),seat=new Map();
-  const free=()=>pl.find(p=>!p.active&&!used.has(p.i));
-  for(const o of info.slice(0,FS.max)){          // match to the seat whose last position is closest
-    let best=null,bd=.5;
-    for(const p of pl)if(p.lastSx!==null&&!used.has(p.i)){const d=Math.abs(p.lastSx-o.sx);if(d<bd){bd=d;best=p;}}
-    if(!best&&(state==='fscount'||S.t<FS.joinUntil))best=free()||null;
-    if(best){used.add(best.i);seat.set(best,o);}
-  }
-  for(const [p,o] of seat){
-    p.active=true;p.lastSx=o.sx;
-    const B=fsBody[p.i],sx=B.sx.f(o.sx,t),sy=B.sy.f(o.sy,t),sw=B.sw.f(o.shW,t),to=B.to.f(o.torso,t);
-    [[19,15],[20,16]].forEach(([a,b],k)=>{
-      const i=o.V(a)>.4?a:(o.V(b)>.4?b:-1);
-      if(i<0){fsHandF[p.i][k].x.reset();fsHandF[p.i][k].y.reset();return;}
-      const nx=.5+(o.X(i)-sx)/(sw*5.2),ny=.5+(o.Y(i)-sy)/(to*2.8),F2=fsHandF[p.i][k];
-      p.hands[k]={x:clamp(F2.x.f(nx,t),-.05,1.05)*W,y:clamp(F2.y.f(ny,t),-.05,1.05)*H};
-    });
-  }
+  const V=i=>lm[i].visibility??1,X=i=>(1-lm[i].x)*asp,Y=i=>lm[i].y;
+  const rsx=(X(11)+X(12))/2,rsy=(Y(11)+Y(12))/2,rsw=Math.abs(X(11)-X(12));
+  const hips=V(23)>.4&&V(24)>.4,rto=hips?Math.max(.05,Math.hypot(rsx-(X(23)+X(24))/2,rsy-(Y(23)+Y(24))/2)):rsw*1.25;
+  const B=fsBody[0],sx=B.sx.f(rsx,t),sy=B.sy.f(rsy,t),sw=B.sw.f(rsw,t),to=B.to.f(rto,t);
+  pl.active=true;pl.lastSx=rsx;
+  [[19,15],[20,16]].forEach(([a,b],k)=>{
+    const i=V(a)>.4?a:(V(b)>.4?b:-1),F2=fsHandF[0][k];
+    if(i<0){F2.x.reset();F2.y.reset();return;}
+    const nx=.5+(X(i)-sx)/(sw*5.2),ny=.5+(Y(i)-sy)/(to*2.8);
+    pl.hands[k]={x:clamp(F2.x.f(nx,t),-.05,1.05)*W,y:clamp(F2.y.f(ny,t),-.05,1.05)*H};
+  });
 }
 function fsBlades(dt,t){
   fsTrack(t);
@@ -1624,6 +1624,10 @@ function drawSlice(t){
   txt(Math.ceil(left)+' s',CX,96,34,C.text,'center',700);
   fsPanels();
   drawCam(40,H-190,260,146,false);
+  if(camMode()){            // show the middle zone the player has to stand in
+    const zx=40+260*(.5-CENTER_ZONE),zw=260*CENTER_ZONE*2;
+    ctx.save();ctx.setLineDash([8,6]);ctx.lineWidth=3;ctx.strokeStyle=C.yellow;ctx.strokeRect(zx,H-190,zw,146);ctx.restore();
+  }
 }
 function fsDraw(t){
   if(state==='fsover'){
@@ -1663,9 +1667,9 @@ function fsDraw(t){
     txt('Swipe your hands through spools and circuit boards',CX,700,40,C.text,'center',600);
     txt('Avoid the red-hot nozzles!',CX,752,36,C.red,'center',700);
     const k=fsActive().length;
-    txt(k>1?`${k} players spotted. Everyone scores on their own.`:'Up to 3 players: stand side by side in front of the camera.',CX,806,28,C.cyan,'center',600);
+    txt(camMode()?'Stand in the middle of the camera view. Friends watching at the sides are ignored.':'',CX,806,28,C.cyan,'center',600);
     if(!camMode())txt('Mouse mode: move the mouse quickly across the parts',CX,856,28,C.dim,'center',500);
-  }else if(camMode()&&!(P.all&&P.all.length)&&t-mouse.t>1)txt('Step back into the camera view',CX,H-150,32,C.orange,'center',600);
+  }else if(camMode()&&!S.players[0].hands[0]&&!S.players[0].hands[1]&&t-mouse.t>1)txt('Stand in the middle of the camera view',CX,H-150,32,C.orange,'center',600);
 }
 
 /* =====================================================================
