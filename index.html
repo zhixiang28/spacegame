@@ -27,8 +27,8 @@
       linear-gradient(rgba(53,224,255,.06) 1px,transparent 1px) 0 0/48px 48px,
       linear-gradient(90deg,rgba(53,224,255,.06) 1px,transparent 1px) 0 0/48px 48px,
       radial-gradient(ellipse at 50% 40%,#12305a,#050b16 70%)}
-  #start h1{margin:0;font-size:clamp(44px,9vw,120px);font-weight:700;letter-spacing:.01em;line-height:1}
-  #start h1 span{color:var(--cyan)}
+  #start h1{margin:0;font-size:clamp(44px,9vw,120px);font-weight:700;letter-spacing:.01em;line-height:1;color:#cf8c2a}
+  #start h1 span{color:#898d8e}
   #start h2{margin:0 0 20px;font-size:clamp(18px,2.4vw,32px);font-weight:500;color:var(--orange);letter-spacing:.14em}
   #start button{font:inherit;font-size:clamp(20px,2.4vw,34px);font-weight:700;padding:.6em 1.6em;border-radius:14px;
     border:3px solid var(--orange);background:rgba(255,138,31,.12);color:var(--text);cursor:pointer}
@@ -99,9 +99,10 @@ function wrap(s,x,y,maxW,size,lh,col,align='left'){
   for(const w of words){const t=line?line+' '+w:w;
     if(ctx.measureText(t).width>maxW&&line){txt(line,x,y,size,col,align,500);y+=lh;line=w;}else line=t;}
   if(line)txt(line,x,y,size,col,align,500);return y;}
+const BRAND={a:'#cf8c2a',b:'#898d8e'};     // SPACElogic logo colours: gold + grey
 function brand(x,y,size){
   ctx.font=`700 ${size}px ${FONT}`;const w1=ctx.measureText(CFG.brand1).width;
-  txt(CFG.brand1,x,y,size,C.text,'left',700);txt(CFG.brand2,x+w1,y,size,C.cyan,'left',700);}
+  txt(CFG.brand1,x,y,size,BRAND.a,'left',700);txt(CFG.brand2,x+w1,y,size,BRAND.b,'left',700);}
 
 /* One Euro filter: smooth when still, responsive when moving fast */
 class OneEuro{
@@ -537,7 +538,7 @@ function drawRoom(t){
   ctx.shadowColor=C.cyan;ctx.shadowBlur=26;ctx.lineWidth=5;ctx.strokeStyle=C.cyan;ctx.stroke();ctx.restore();
   ctx.font=`700 108px ${FONT}`;
   const bw=ctx.measureText('SPACElogic').width;
-  ctx.save();ctx.shadowColor=C.cyan;ctx.shadowBlur=22;brand(CX-bw/2,172,108);ctx.restore();
+  ctx.save();ctx.shadowColor=BRAND.a;ctx.shadowBlur=22;brand(CX-bw/2,172,108);ctx.restore();
   txt('MAKER SPACE',CX,226,34,C.orange,'center',600);
   // shelf with spools
   ctx.fillStyle='#202f4f';ctx.fillRect(1400,120,440,10);ctx.fillRect(1400,240,440,10);ctx.fillRect(1400,350,440,10);
