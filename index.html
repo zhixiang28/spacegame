@@ -1181,6 +1181,7 @@ function rcView(v,vx,vy,vw,vh,t){
   const R=RCC,N=rc.N,L=rc.len,SL=R.segLen;
   ctx.save();ctx.beginPath();ctx.rect(vx,vy,vw,vh);ctx.clip();ctx.translate(vx,vy);
   RV.w=vw;RV.h=vh;
+  const vwE=Math.min(vw,vh*16/9);          // projection width: wide, short views (2 players) keep a normal 16:9 field so obstacles stay visible
   const camZ=(((v.z-R.playerZ)%L)+L)%L,bi=Math.floor(camZ/SL),bseg=rc.segs[bi],bp=(camZ%SL)/SL;
   const pseg=rcSegAt(v.z),pp=(((v.z%SL)+SL)%SL)/SL;
   const camY=R.camH+lerp(pseg.y0,pseg.y1,pp)+v.bounce*40,camX=v.x*R.roadW;
@@ -1192,9 +1193,9 @@ function rcView(v,vx,vy,vw,vh,t){
     const a=seg.a,b=seg.b;
     a.z=z1;b.z=z2;
     a.sc=R.camD/z1;b.sc=R.camD/z2;
-    a.sx=Math.round(vw/2+a.sc*(x-camX)*vw/2);b.sx=Math.round(vw/2+b.sc*(x+dx-camX)*vw/2);
+    a.sx=Math.round(vw/2+a.sc*(x-camX)*vwE/2);b.sx=Math.round(vw/2+b.sc*(x+dx-camX)*vwE/2);
     a.sy=Math.round(vh/2-a.sc*(seg.y0-camY)*vh/2);b.sy=Math.round(vh/2-b.sc*(seg.y1-camY)*vh/2);
-    a.sw=Math.round(a.sc*R.roadW*vw/2);b.sw=Math.round(b.sc*R.roadW*vw/2);
+    a.sw=Math.round(a.sc*R.roadW*vwE/2);b.sw=Math.round(b.sc*R.roadW*vwE/2);
     x+=dx;dx+=seg.curve;
     seg.clip=maxy;seg.vis=z1>700;
     if(z1<=R.camD||b.sy>=a.sy||b.sy>=maxy)continue;
@@ -1216,13 +1217,13 @@ function rcView(v,vx,vy,vw,vh,t){
   const vlap=Math.floor(v.z/L);
   for(let n=R.drawN-1;n>=0;n--){
     const seg=rc.segs[(bi+n)%N];if(!seg.vis)continue;
-    const a=seg.a,b=seg.b,k=a.sc*vw/2;
+    const a=seg.a,b=seg.b,k=a.sc*vwE/2;
     for(const s of seg.sprites){
       if(a.z<1100||(s.type==='gear'&&s.taken[v.id]===vlap))continue;   // too close to the camera
       rcDrawSprite(s.type,a.sx+k*s.o*R.roadW,a.sy,k,seg.clip,t,s,v);
     }
     for(const c of seg.cars){
-      const pct=(((c.z%SL)+SL)%SL)/SL,sc=lerp(a.sc,b.sc,pct),kk=sc*vw/2;
+      const pct=(((c.z%SL)+SL)%SL)/SL,sc=lerp(a.sc,b.sc,pct),kk=sc*vwE/2;
       const cx=lerp(a.sx,b.sx,pct)+kk*c.x*R.roadW,cy=lerp(a.sy,b.sy,pct);
       rcDrawSprite('car',cx,cy,kk,seg.clip,t,c,v);
     }
