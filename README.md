@@ -2,11 +2,13 @@
 
 Open `index.html` on the TV (serve it over https, e.g. GitHub Pages). Staff press **Start the experience** once; after that visitors run everything themselves.
 
-## Controls for visitors
-- **Pinch to select everywhere**: point with one hand and touch thumb and index finger together to press. Best from about 1 to 1.5 m.
-  If no hand is seen, the older "hold your raised hand on a button" control still works, and the mouse always works.
-- A welcome screen invites people in; after 45 s with nobody around the menu returns to it.
-- During body games (Maker Run, Filament Slice) the camera follows the body; menus and results switch back to hand tracking.
+## Controls for visitors (made for 1 to 2 metres from the screen)
+- **Point and hold still.** Raise one hand and point at the screen; hold it still on a button for about a second to select it (a ring fills). No finger detail is needed, so it works at normal standing distance.
+- **One player is locked in.** The camera may see several people, but it locks onto the person standing closest to the middle (and close enough, about 3 m or less) and keeps following that same person, so people walking past or watching are ignored. They show dimmed in the camera preview. If the player leaves for about 2.5 s the lock is released; the welcome screen always starts fresh.
+- **One hand points, and it stays the same hand.** The raised hand is used; the other must be clearly higher for 0.7 s to take over, so left and right do not flicker. The preview shows which hand is active.
+- In Escape Protocol puzzles: *tap* = hold on a target; *grab* = hold on a handle, move it, hold still again to let go; some puzzles need no click at all (circle a wheel, sweep a sonar, move your hand up and down to pump).
+- The pose model is the accurate "full" one and switches to the fast "lite" model by itself on slow computers (see `CFG.model`).
+- A welcome screen invites people in; after 45 s with nobody around the menu returns to it. The mouse always works.
 
 ## Circuit Racers (phones as steering wheels)
 1. Pick **Circuit Racers** on the TV. A QR code appears in the lobby.
@@ -31,10 +33,10 @@ Files: `index.html` (TV: menu, Maker Run, Circuit Racers), `controller.html` (ph
 - The TV page goes full screen when you press **Start the station** (press **F** to toggle).
 - In Chrome or Edge, use **Install as an app** on the start screen (or the install icon in the address bar) to get a desktop icon that opens full screen with no browser bars. Needs https.
 
-## Escape Protocol (finger pinch)
-A 2D escape room controlled with one hand: pinch thumb and index finger to press, keep pinching to drag.
+## Escape Protocol (point, hold and move)
+A 2D escape room controlled with one pointing hand and your body (see the controls above).
 Pick one of three missions: **Orbital** (stop a space-station reactor), **Nexus Lab** (escape a rogue AI's lockdown) or **Abyss-7** (get out of a flooding deep-sea base).
-Each mission has its own five puzzles in six minutes, mixing hand pinches with full-body moves:
+Each mission has its own five puzzles in seven minutes, mixing a pointing hand with full-body moves (seven minutes):
 - **Orbital**: UV scanner search for the code, rotate pipe tiles to route coolant, **lean your body** to keep the spinning station in the green, flip mirrors to aim a laser into the core, then keypad + lever.
 - **Nexus Lab**: repeat NOVA's light sequence, rewire the bio-lock, **copy NOVA's body-scan poses** (arms up, arms out, one arm up), draw the leaked unlock pattern, then hold the override charge while dodging NOVA's scanner beam.
 - **Abyss-7**: turn three valve wheels shut, ping the sonar to find the code buoys, **swim with big arm strokes** to the airlock, tune the rescue frequency, then keypad + pump the release.

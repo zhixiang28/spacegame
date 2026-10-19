@@ -49,20 +49,21 @@
   <button id="startBtn">Start the experience</button>
   <button id="installBtn" style="display:none">Install as an app</button>
   <p>For staff: allow camera access when asked, with the camera at chest height.
-     Visitors control everything with a pinch of thumb and index finger. Mouse works too. Press F to toggle full screen.</p>
+     Visitors point with one hand and hold still to select, from 1 to 2 metres. Mouse works too. Press F to toggle full screen.</p>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
 <script type="module">
-import {FilesetResolver, PoseLandmarker, HandLandmarker} from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+import {FilesetResolver, PoseLandmarker} from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
 
 /* =====================================================================
    CONFIG: tweak these on site
    ===================================================================== */
 const CFG = {
   brand1:'SPACE', brand2:'logic', sub:'MAKER SPACE ARCADE',
-  model:'lite',            // 'lite' = fast, 'full' = more accurate
+  model:'full',            // 'full' = more accurate at 1-3 m (falls back to 'lite' by itself on slow machines)
+  minShW:0.09,             // ignore people whose shoulders are narrower than this share of the frame (too far away)
   dwell:1.0,               // seconds to hold the hand cursor on a button
   roundSeconds:75,         // one shift length
   lives:3,
@@ -74,7 +75,7 @@ const CFG = {
   stepOn:0.55              // or sidestep, in shoulder widths
 };
 const WASM  = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm';
-const MODEL = `https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_${CFG.model}/float16/1/pose_landmarker_${CFG.model}.task`;
+const modelUrl = m => `https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_${m}/float16/1/pose_landmarker_${m}.task`;
 const FONT  = "'Chakra Petch', Bahnschrift, system-ui, sans-serif";
 const C = {bg:'#050b16',panel:'#0e1d36',cyan:'#35e0ff',orange:'#ff8a1f',yellow:'#ffd23f',red:'#ff4d5e',
            green:'#4dff9a',text:'#e8f4ff',dim:'#6b86a8'};
@@ -144,9 +145,9 @@ const sfx={
    ===================================================================== */
 let landmarker=null,camOK=false,status='Starting…';
 const P={ok:false,lastSeen:-99,sx:0,sy:0,hx:0,hy:0,shW:.15,torso:.25,hasHips:false,lean:0,
-         cur:{x:.5,y:.5},curOk:false,bothUp:false,lm:null,all:[]};
+         cur:{x:.5,y:.5},curOk:false,bothUp:false,lm:null,all:[],others:[],handSide:''};
 const F={sx:new OneEuro(),sy:new OneEuro(),sw:new OneEuro(),hx:new OneEuro(),hy:new OneEuro(),
-         cx:new OneEuro(1.2,4),cy:new OneEuro(1.2,4)};
+         cx:new OneEuro(.9,8),cy:new OneEuro(.9,8)};
 const camMode=()=>camOK&&!!landmarker;
 
 async function initCam(){
@@ -155,48 +156,61 @@ async function initCam(){
     video.srcObject=s;await video.play();camOK=true;
   }catch(e){status='No camera (mouse and keyboard mode)';console.warn(e);}
 }
+async function makeLandmarker(model){
+  const fs=visionFS||(visionFS=await FilesetResolver.forVisionTasks(WASM));
+  const opts=d=>({baseOptions:{modelAssetPath:modelUrl(model),delegate:d},runningMode:'VIDEO',numPoses:3,   // see up to 3 people, then lock onto one
+    minPoseDetectionConfidence:.4,minPosePresenceConfidence:.4,minTrackingConfidence:.4});
+  try{return await PoseLandmarker.createFromOptions(fs,opts('GPU'));}
+  catch(e){return await PoseLandmarker.createFromOptions(fs,opts('CPU'));}
+}
 async function initModel(){
-  try{
-    status='Loading pose model…';
-    const fs=await FilesetResolver.forVisionTasks(WASM);visionFS=fs;
-    const opts=d=>({baseOptions:{modelAssetPath:MODEL,delegate:d},runningMode:'VIDEO',numPoses:1,
-      minPoseDetectionConfidence:.5,minPosePresenceConfidence:.5,minTrackingConfidence:.5});
-    try{landmarker=await PoseLandmarker.createFromOptions(fs,opts('GPU'));}
-    catch(e){landmarker=await PoseLandmarker.createFromOptions(fs,opts('CPU'));}
-    status='';
-  }catch(e){status='Pose model failed to load (mouse and keyboard mode)';console.error(e);}
+  try{status='Loading pose model…';landmarker=await makeLandmarker(CFG.model);status='';}
+  catch(e){status='Pose model failed to load (mouse and keyboard mode)';console.error(e);}
 }
-let lastVT=-1,detN=0;
+let detMs=0,detCnt=0;
+let lastVT=-1;
 function detect(now){
-  if(!camOK||video.readyState<2||video.currentTime===lastVT)return;
-  let hands=handLM&&(ES_STATES.includes(state)||HAND_UI.includes(state))&&!esBody();   // menus and Escape Protocol track fingers; body puzzles track the body
-  // on menu screens, keep checking the body every other frame until a hand shows up, so pointing still works
-  if(hands&&landmarker&&!ES_STATES.includes(state)&&now/1000-HD.seen>1.5&&(detN++%2))hands=false;
-  if(!hands&&!landmarker)return;
+  if(!camOK||!landmarker||video.readyState<2||video.currentTime===lastVT)return;
   lastVT=video.currentTime;
-  if(hands)processHands(handLM.detectForVideo(video,now),now/1000);
-  else processPose(landmarker.detectForVideo(video,now).landmarks,now/1000);
-}
-/* the player is whoever stands closest to the middle of the camera view; people watching at the sides are ignored */
-const CENTER_ZONE=.2;      // half-width of the middle zone, as a fraction of the frame
-const poseMid=lm=>(lm[11].x+lm[12].x)/2;
-function centralPose(lms,onlyZone=false){
-  let best=null,bd=9;
-  for(const lm of lms){
-    if((lm[11].visibility??1)<.5||(lm[12].visibility??1)<.5)continue;
-    const d=Math.abs(poseMid(lm)-.5);
-    if(d<bd){bd=d;best=lm;}
+  const t0=performance.now(),res=landmarker.detectForVideo(video,now);
+  processPose(res.landmarks,now/1000);
+  detMs+=performance.now()-t0;
+  if(++detCnt===90){                                   // too slow for the accurate model? switch to the fast one
+    if(CFG.model==='full'&&detMs/detCnt>42){CFG.model='lite';makeLandmarker('lite').then(l=>{landmarker=l;}).catch(()=>{});}
+    detMs=0;detCnt=0;
   }
-  if(onlyZone&&bd>CENTER_ZONE)return null;
-  return best||lms[0];
 }
+/* PLAYER LOCK: the camera may see several people. We lock onto ONE person (the nearest to the middle that is close enough)
+   and keep following that same person by position and size, so bystanders walking past or watching cannot take over. */
+const CENTER_ZONE=.2;                                  // half-width of the middle zone, as a fraction of the frame
+const LOCK={on:false,cx:.5,sw:.15,t:-9};
+const HSEL={side:0,sw:0,lost:0};                       // which hand points: -1 = the player's left, +1 = right
+function personInfo(lm){
+  if((lm[11].visibility??1)<.5||(lm[12].visibility??1)<.5)return null;
+  return{lm,cx:(lm[11].x+lm[12].x)/2,sw:Math.abs(lm[11].x-lm[12].x)};
+}
+function pickPerson(lms,t){
+  const c=[];for(const lm of lms){const o=personInfo(lm);if(o)c.push(o);}
+  P.others=[];
+  if(LOCK.on){
+    let best=null,bd=9;
+    for(const o of c){const d=Math.abs(o.cx-LOCK.cx),r=o.sw/LOCK.sw;if(d<.2&&r>.6&&r<1.7&&d<bd){bd=d;best=o;}}
+    if(best){LOCK.cx+=(best.cx-LOCK.cx)*.35;LOCK.sw+=(best.sw-LOCK.sw)*.1;LOCK.t=t;for(const o of c)if(o!==best)P.others.push(o.lm);return best.lm;}
+    if(t-LOCK.t>2.5){LOCK.on=false;HSEL.side=0;}
+    for(const o of c)P.others.push(o.lm);return null;
+  }
+  let best=null,bs=0;
+  for(const o of c){if(o.sw<CFG.minShW||Math.abs(o.cx-.5)>.28)continue;const s=o.sw*(1-1.5*Math.abs(o.cx-.5));if(s>bs){bs=s;best=o;}}
+  if(best){LOCK.on=true;LOCK.cx=best.cx;LOCK.sw=best.sw;LOCK.t=t;for(const o of c)if(o!==best)P.others.push(o.lm);return best.lm;}
+  for(const o of c)P.others.push(o.lm);return null;
+}
+const unlockPlayer=()=>{LOCK.on=false;HSEL.side=0;};
 function processPose(lms,t){
   P.bothUp=false;P.all=lms||[];
-  if(!lms||!lms.length){P.ok=false;P.lm=null;return;}
-  const lm=centralPose(lms);P.lm=lm;
+  const lm=pickPerson(lms||[],t);P.lm=lm;
+  if(!lm){P.ok=false;P.curOk=false;HD.ok=false;return;}
   const asp=video.videoWidth/video.videoHeight;
   const X=i=>(1-lm[i].x)*asp,Y=i=>lm[i].y,V=i=>lm[i].visibility??1;
-  if(V(11)<.5||V(12)<.5){P.ok=false;return;}
   P.ok=true;P.lastSeen=t;
   P.sx=F.sx.f((X(11)+X(12))/2,t);
   P.sy=F.sy.f((Y(11)+Y(12))/2,t);
@@ -207,18 +221,28 @@ function processPose(lms,t){
     P.torso=Math.max(.05,Math.hypot(P.sx-P.hx,P.sy-P.hy));
     P.lean=(P.sx-P.hx)/P.torso;
   }else{P.torso=P.shW*1.25;P.lean=0;}
-  // pointing hand = the highest of the two index fingers (falls back to wrists)
-  let best=null;
-  for(const [a,b] of [[19,15],[20,16]]){
-    const i=V(a)>.4?a:(V(b)>.4?b:-1);if(i<0)continue;
-    if(!best||Y(i)<best.y)best={x:X(i),y:Y(i)};
+  const tor=P.torso,sw=P.shW;
+  // --- which hand points: the one raised above the hip line; stays on that hand until the other is clearly higher for 0.7 s
+  const raise=i=>V(i)>.35?(P.sy+.75*tor)-Y(i):-9;      // how far the wrist is above the hip line
+  const rl=raise(15),rr_=raise(16);
+  if(HSEL.side===0){if(Math.max(rl,rr_)>0){HSEL.side=rl>rr_?-1:1;HSEL.sw=0;HSEL.lost=0;F.cx.reset();F.cy.reset();}}
+  else{
+    const cur=HSEL.side===-1?rl:rr_,oth=HSEL.side===-1?rr_:rl;
+    if(cur<=0){HSEL.lost+=t-(HSEL.lt||t);if(HSEL.lost>.6){HSEL.side=0;HSEL.lost=0;}}else HSEL.lost=0;
+    if(oth>cur+.4*tor&&oth>0){if(!HSEL.sw)HSEL.sw=t;if(t-HSEL.sw>.7){HSEL.side=-HSEL.side;HSEL.sw=0;F.cx.reset();F.cy.reset();}}else HSEL.sw=0;
+    HSEL.lt=t;
   }
-  if(best){
-    // body-relative mapping: works at any distance from the camera
-    const cx=.5+(best.x-P.sx)/(P.shW*3);
-    const cy=(best.y-(P.sy-.9*P.torso))/(1.7*P.torso);
-    P.cur.x=F.cx.f(cx,t);P.cur.y=F.cy.f(cy,t);P.curOk=cy<1.1;
-  }else{P.curOk=false;F.cx.reset();F.cy.reset();}
+  if(HSEL.side!==0){
+    const w=HSEL.side===-1?15:16,ix=HSEL.side===-1?19:20;
+    const useIx=V(ix)>.4;
+    const hx=useIx?.55*X(w)+.45*X(ix):X(w),hy=useIx?.55*Y(w)+.45*Y(ix):Y(w);
+    // body-relative mapping: each hand covers the whole screen from its own side, at any distance from the camera
+    const cx=.5+(hx-(P.sx+HSEL.side*.45*sw))/(sw*2.0);
+    const cy=(hy-(P.sy-.8*tor))/(1.8*tor);
+    P.cur.x=F.cx.f(cx,t);P.cur.y=F.cy.f(cy,t);P.curOk=raise(w)>0;P.handSide=HSEL.side===-1?'L':'R';
+  }else{P.curOk=false;}
+  HD.ok=P.curOk;
+  if(P.curOk){HD.x=clamp(P.cur.x,0,1)*W;HD.y=clamp(P.cur.y,0,1)*H;HD.seen=t;}
   P.bothUp=V(15)>.5&&V(16)>.5&&Y(15)<Y(0)&&Y(16)<Y(0);
 }
 const tracked=t=>camMode()&&P.ok&&t-P.lastSeen<.6;
@@ -230,6 +254,10 @@ function drawCam(x,y,w,h,label=true){
   if(camOK&&video.readyState>=2){
     ctx.save();ctx.translate(x+w,y);ctx.scale(-1,1);ctx.globalAlpha=.8;ctx.drawImage(video,0,0,w,h);ctx.restore();
   }
+  for(const o of P.others||[]){                          // other people: shown dim, ignored
+    const q=i=>[x+(1-o[i].x)*w,y+o[i].y*h];ctx.strokeStyle='rgba(180,190,205,.4)';ctx.lineWidth=Math.max(2,w/130);ctx.lineCap='round';
+    for(const [a,b] of CONN){if((o[a].visibility??1)<.4||(o[b].visibility??1)<.4)continue;const A=q(a),B=q(b);ctx.beginPath();ctx.moveTo(A[0],A[1]);ctx.lineTo(B[0],B[1]);ctx.stroke();}
+  }
   if(P.lm){
     const pt=i=>[x+(1-P.lm[i].x)*w,y+P.lm[i].y*h];
     ctx.strokeStyle=C.cyan;ctx.lineWidth=Math.max(3,w/90);ctx.lineCap='round';
@@ -238,11 +266,12 @@ function drawCam(x,y,w,h,label=true){
     ctx.fillStyle=C.orange;
     for(const i of [0,11,12,15,16,19,20,23,24]){if((P.lm[i].visibility??1)<.4)continue;
       const p=pt(i);ctx.beginPath();ctx.arc(p[0],p[1],Math.max(4,w/70),0,7);ctx.fill();}
+    if(P.curOk&&P.handSide){const wi=P.handSide==='L'?15:16,p=pt(wi);ctx.strokeStyle=UI.goldL;ctx.lineWidth=Math.max(3,w/100);ctx.beginPath();ctx.arc(p[0],p[1],Math.max(9,w/32),0,7);ctx.stroke();}
   }
   ctx.restore();
   rr(x,y,w,h,18);ctx.lineWidth=3;ctx.strokeStyle=P.ok?C.green:'#2b3d5c';ctx.stroke();
   if(label){
-    const s=!camOK?'No camera':!landmarker?'Loading model…':P.ok?'Tracking':'No player in view';
+    const s=!camOK?'No camera':!landmarker?'Loading model…':P.ok?'Tracking you'+((P.others||[]).length?`  ·  ${P.others.length} ignored`:''):'No player in view';
     txt(s,x+14,y+h-14,Math.max(18,w/16),P.ok?C.green:C.dim,'left',600);
   }
 }
@@ -259,32 +288,32 @@ const cal={samples:[],msg:'',prog:0,ok:false};
 let cdLast=-1;
 
 function go(s){state=s;stateT=0;lock=.6;hov={id:null,t:0};cdLast=-1;fadeT=1;
-  if(!s.startsWith('fs'))fsSetPoses(1);
+  if(s==='home')unlockPlayer();
   if(!s.startsWith('es')&&window.speechSynthesis)try{speechSynthesis.cancel();}catch(e){}}
 function addBtn(id,x,y,w,h,on=true,noHand=false){buttons.push({id,x,y,w,h,on,noHand});}
 const inRect=(p,x,y,w,h)=>p.on&&p.x>=x&&p.x<=x+w&&p.y>=y&&p.y<=y+h;
 function pointer(t){
-  if(EI.on&&EI.src==='hand')return{x:EI.x,y:EI.y,on:true,src:'pinch'};
+  if(EI.on&&EI.src==='hand')return{x:EI.x,y:EI.y,on:true,src:'hand'};
   if(ES_STATES.includes(state)&&EI.on)return{x:EI.x,y:EI.y,on:true,src:'mouse'};
   if(t-mouse.t<4)return{x:mouse.x,y:mouse.y,on:true,src:'mouse'};
-  if(camMode()&&tracked(t)&&P.curOk)return{x:clamp(P.cur.x,0,1)*W,y:clamp(P.cur.y,0,1)*H,on:true,src:'hand'};
   return{on:false};
 }
 function updateUI(dt,t){
   ptr=pointer(t);
   if(ptr.on)lastActive=t;
-  const hb=ptr.on?btnAt(ptr,ptr.src==='pinch'?24:0):null,hid=hb&&state!=='home'?hb.id:null;
+  const pad=ptr.src==='hand'?34:0;
+  let h=null;
+  if(ptr.on)for(const b of buttons)if(b.on&&!(b.noHand&&ptr.src!=='mouse')&&inRect(ptr,b.x-pad,b.y-pad,b.w+2*pad,b.h+2*pad)){h=b;break;}
+  const hid=h&&state!=='home'?h.id:null;
   if(hid&&hid!==hoverId)beep(1500,.025,'sine',.025);           // soft tick when the cursor lands on something
   hoverId=hid;
-  if(ptr.src==='pinch'&&!HAND_UI.includes(state)&&state!=='esmenu'&&state!=='esresult'){hov={id:null,t:0};return;}   // in puzzles pinch only
-  let h=null;
-  if(ptr.on)for(const b of buttons)if(b.on&&!(b.noHand&&ptr.src!=='mouse')&&b.id!=='home:go'&&inRect(ptr,b.x-(ptr.src==='pinch'?40:0),b.y-(ptr.src==='pinch'?40:0),b.w+(ptr.src==='pinch'?80:0),b.h+(ptr.src==='pinch'?80:0))){h=b;break;}
   if(!h||lock>0){hov={id:null,t:0};return;}
   if(hov.id!==h.id)hov={id:h.id,t:0};
   hov.t+=dt;
-  if(hov.t>=(ptr.src==='pinch'?2:CFG.dwell)){const id=h.id;hov={id:null,t:0};press(id);}
+  if(hov.t>=dwellOf(h.id)){const id=h.id;hov={id:null,t:0};press(id);}
 }
-const prog=id=>hov.id===id?clamp(hov.t/(ptr.src==='pinch'?2:CFG.dwell),0,1):0;
+const dwellOf=id=>(id==='menu'&&EXIT_STATES.includes(state))?2.2:id==='home:go'?.9:CFG.dwell;
+const prog=id=>hov.id===id?clamp(hov.t/dwellOf(id),0,1):0;
 function press(id){
   sfx.select();
   if(id==='game:runner'||id==='again')startFlow();
@@ -450,7 +479,7 @@ const GAMES=[
    desc:'Sprint across the workshop floor. Lean to switch lanes, jump toolboxes, duck the laser gantry, grab gears.',ready:true,art:'runner'},
   {id:'racer',title:'Circuit Racers',sub:'Your phone is the wheel',
    desc:'Scan the QR code, tilt your phone to steer, race up to 4 friends and the CPU racers.',ready:true,art:'racer'},
-  {id:'escape',title:'Escape Protocol',sub:'Pinch to hack',
+  {id:'escape',title:'Escape Protocol',sub:'Point and hold to hack',
    desc:'Pick a mission, scan for clues, rewire and crack the code before time runs out.',ready:true,art:'escape'},
   {id:'slice',title:'Filament Slice',sub:'Swipe and slash',
    desc:'Parts fly across the screen. Slice the filament spools and PCBs, skip the hot nozzles.',ready:true,art:'slice'}
@@ -741,7 +770,7 @@ function drawCalib(t){
   if(cal.prog>0){rr(CX-260,y+h+112,520*cal.prog,8,4);ctx.fillStyle='#7dffb5';ctx.fill();}
   utxt('Hold both hands above your head to leave',CX,H-40,18,UI.faint,'center',600,2);
 }
-/* one results layout for every game: a glass card with the result, best scores and big pinch buttons */
+/* one results layout for every game: a glass card with the result, best scores and big hold-to-press buttons */
 function resultCard(o,t){
   ctx.fillStyle='rgba(7,9,13,.86)';ctx.fillRect(0,0,W,H);
   const w=980,h=820,x=CX-w/2,y=(H-h)/2;
@@ -762,7 +791,7 @@ function resultCard(o,t){
   }else if(o.listTitle)utxt(o.empty||'',CX,y+530,20,UI.mute,'center',500);
   const bs=o.btns,bw=bs.length>2?290:400,gap=24,bx0=CX-(bs.length*bw+(bs.length-1)*gap)/2;
   bs.forEach(([id,label,primary,noHand],i)=>rcBtn(id,label,bx0+i*(bw+gap),y+h-180,bw,112,true,primary,noHand));
-  utxt(o.hint||'Point at a button and pinch',CX,y+h-34,16,UI.faint,'center',600,3);
+  utxt(o.hint||'Point at a button and hold still',CX,y+h-34,16,UI.faint,'center',600,3);
 }
 function drawOver(t){
   drawScene(t);
@@ -1400,7 +1429,7 @@ function rcDrawResults(t){
   rcBtn('rc:again','Race again',CX-640,840,380,112,true,true,true);
   rcBtn('rc:lobby','Change players',CX-190,840,380,112,true,false);
   rcBtn('menu','Back to menu',CX+260,840,380,112,true,false);
-  utxt('Point at a button and pinch',CX,1010,16,UI.faint,'center',600,3);
+  utxt('Point at a button and hold still',CX,1010,16,UI.faint,'center',600,3);
 }
 function rcDraw(t){
   if(state==='lobby')rcDrawLobby(t);
@@ -1439,17 +1468,13 @@ const fsHandF=Array.from({length:FS.max},()=>[0,1].map(()=>({x:new OneEuro(2.5,1
 const fsBest=()=>{try{return JSON.parse(localStorage.getItem('sl_slice_best')||'[]');}catch(e){return[];}};
 let fsPoses=1;
 window.__fs=S;   // handy for debugging in the console
-function fsSetPoses(n){      // track several people only while Filament Slice is open
-  if(!landmarker||fsPoses===n)return;fsPoses=n;
-  try{const r=landmarker.setOptions({numPoses:n});if(r&&r.catch)r.catch(()=>{});}catch(e){}
-}
 function resetSlice(){
   Object.assign(S,{t:0,objs:[],frags:[],pops:[],sparks:[],nextWave:.6,flash:0,shake:0,newBest:false});
   S.players=Array.from({length:FS.max},(_,i)=>({i,col:FS.cols[i],score:0,lives:CFG.lives,combo:0,comboT:0,sliced:0,missed:0,
     active:i===0,out:false,lastSx:null,hands:[null,null]}));
   for(const b of S.blades){b.on=b.pon=false;b.trail.length=0;}
 }
-function startSlice(){resetSlice();fsSetPoses(FS.detect);go('fscount');}
+function startSlice(){resetSlice();go('fscount');}
 const fsActive=()=>S.players.filter(p=>p.active);
 
 function fsWave(){
@@ -1463,8 +1488,8 @@ function fsWave(){
 /* one player: the person standing in the middle of the camera view. Friends watching at the sides are ignored. */
 function fsTrack(t){
   const pl=S.players[0];pl.hands=[null,null];
-  if(!camMode()||!P.all||!P.all.length)return;
-  const lm=centralPose(P.all,true);if(!lm)return;
+  if(!camMode()||!tracked(t)||!P.lm)return;
+  const lm=P.lm;
   const asp=video.videoWidth/video.videoHeight;
   const V=i=>lm[i].visibility??1,X=i=>(1-lm[i].x)*asp,Y=i=>lm[i].y;
   const rsx=(X(11)+X(12))/2,rsy=(Y(11)+Y(12))/2,rsw=Math.abs(X(11)-X(12));
@@ -1662,7 +1687,7 @@ function fsDraw(t){
 
 /* =====================================================================
    ESCAPE PROTOCOL: 2D escape room driven by hand tracking.
-   Pinch thumb + index finger to press, keep pinching to drag.
+   Point with one hand and hold still to click; hold still on a handle to grab it, again to let go.
    Three missions (space station, high-tech lab, deep-sea base), four
    puzzles each: UV scan for the code, rewire, tune a signal, keypad + lever.
    ===================================================================== */
@@ -1670,40 +1695,11 @@ const ES_STATES=['esmenu','esintro','esplay','esend','esresult'];
 const HAND_MODEL='https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task';
 const ES_DUR=420;                        // seconds per mission
 const RX=60,RY=140,RW=1800,RH=770;       // puzzle room rectangle
-let handLM=null,handLoading=false,visionFS=null;
-const HD={ok:false,x:W/2,y:H/2,pinch:false,d:1,lm:null,seen:-9,fx:new OneEuro(1.6,12),fy:new OneEuro(1.6,12),close:0,pinchT:0};
+let visionFS=null;
+const HD={ok:false,x:W/2,y:H/2,seen:-9};          // the pointing hand, fed by the pose tracker
 const EI={x:W/2,y:H/2,on:false,down:false,pressed:false,released:false,src:'none'};
 let mouseDown=false;
 
-async function initHands(){
-  if(handLM||handLoading||!camOK)return;
-  handLoading=true;
-  try{
-    if(!visionFS)visionFS=await FilesetResolver.forVisionTasks(WASM);
-    const o=d=>({baseOptions:{modelAssetPath:HAND_MODEL,delegate:d},runningMode:'VIDEO',numHands:2,
-      minHandDetectionConfidence:.5,minHandPresenceConfidence:.5,minTrackingConfidence:.5});
-    try{handLM=await HandLandmarker.createFromOptions(visionFS,o('GPU'));}
-    catch(e){handLM=await HandLandmarker.createFromOptions(visionFS,o('CPU'));}
-  }catch(e){console.error(e);ES.handErr='Hand tracking did not load. Use the mouse.';}
-  handLoading=false;
-}
-function processHands(res,t){
-  const hs=res&&res.landmarks;
-  if(!hs||!hs.length){if(t-HD.seen>.35){HD.ok=false;HD.lm=null;HD.pinch=false;HD.fx.reset();HD.fy.reset();}return;}   // ride out short dropouts
-  let lm=hs[0],bd=9;
-  for(const h of hs){const d=Math.abs(h[9].x-.5);if(d<bd){bd=d;lm=h;}}       // the hand nearest the middle of the view
-  HD.lm=lm;HD.ok=true;HD.seen=t;
-  const asp=(video.videoWidth/video.videoHeight)||16/9;
-  const dd=(a,b)=>Math.hypot((lm[a].x-lm[b].x)*asp,lm[a].y-lm[b].y);
-  HD.d=dd(4,8)/Math.max(.02,dd(0,9));                                       // thumb-index gap relative to hand size
-  // forgiving pinch: closes at .42, needs a clear opening (.62) to release, so drags do not drop
-  if(!HD.pinch&&HD.d<.42){HD.pinch=true;HD.pinchT=t;beep(1100,.04,'sine',.035);}else if(HD.pinch&&HD.d>.62)HD.pinch=false;
-  HD.close=clamp((.9-HD.d)/(.9-.42),0,1);
-  // steer with the knuckle (5,9) so the cursor does not jump when the fingers close
-  const mx=1-(lm[5].x+lm[9].x)/2,my=(lm[5].y+lm[9].y)/2;
-  HD.x=HD.fx.f(clamp((mx-.3)/.4,0,1),t)*W;                                  // a small hand movement covers the whole screen
-  HD.y=HD.fy.f(clamp((my-.2)/.45,0,1),t)*H;
-}
 
 /* ---------------- the three missions ---------------- */
 const STORIES=[
@@ -1729,8 +1725,8 @@ const STORIES=[
   tune:'RESCUE FREQUENCY',lever:'PUMP THE RELEASE',
   win:['Pod away. The rescue sub has you.','Welcome back to the surface.'],fail:['The module is flooded.','Abyss-7 is lost.'],winTitle:'POD LAUNCHED',failTitle:'BASE FLOODED'}
 ];
-const HINTS={scan:'Move your hand to sweep the UV scanner. Pinch and drag the loose panels to look behind them.',
-  wires:'Pinch a cable end on the left and drag it to the socket with the matching symbol.'};
+const HINTS={scan:'Move your hand to sweep the UV scanner. Hold on a panel to slide it aside and look behind it.',
+  wires:'Hold on a cable end on the left, then hold on the socket with the matching symbol.'};
 const usesCode=()=>esS().stages.some(s=>s==='scan'||s==='sonar');
 const ES={story:0,stage:0,t:0,penalty:0,code:[0,0,0,0],found:[false,false,false,false],P:null,clear:0,
   lines:[],li:0,lt:0,parts:[],pops:[],shake:0,flash:0,flashCol:'#fff',won:false,left:0,voice:true,handErr:'',newBest:false};
@@ -1750,7 +1746,7 @@ function esBurst(x,y,col,n=24,sp=420){for(let i=0;i<n;i++){const a=rand(0,7),v=r
 function esPop(s,col){ES.pops.push({s,col,t:0});}
 function esPenalty(s,x,y){ES.penalty+=s;ES.shake=.35;ES.flash=.5;ES.flashCol='#ff4d5e';esPop(`-${s}s`,C.red);esBurst(x,y,'#ff4d5e',18,300);sfx.hit();}
 
-function esOpen(){initHands();go('esmenu');}
+function esOpen(){go('esmenu');}
 function esStart(i){
   ES.story=i;ES.code=[0,1,2,3].map(()=>Math.floor(Math.random()*10));ES.found=[false,false,false,false];
   Object.assign(ES,{stage:0,t:0,penalty:0,clear:0,parts:[],pops:[],shake:0,flash:0,won:false,newBest:false});
@@ -1788,15 +1784,12 @@ function makeScan(){
 const covered=(P,g)=>P.panels.some(p=>g.x>p.x&&g.x<p.x+p.w&&g.y>p.y&&g.y<p.y+p.h);
 function updScan(P,dt){
   if(EI.pressed&&EI.on){for(let k=P.panels.length-1;k>=0;k--){const p=P.panels[k];
-    if(inRect(EI,p.x,p.y,p.w,p.h)){P.drag={p,dx:EI.x-p.x,dy:EI.y-p.y};P.panels.push(P.panels.splice(k,1)[0]);beep(300,.06,'triangle',.04);break;}}}
-  if(P.drag){
-    const p=P.drag.p;
-    if(EI.down){p.x=clamp(EI.x-P.drag.dx,RX,RX+RW-p.w);p.y=clamp(EI.y-P.drag.dy,RY,RY+RH-p.h);}
-    else{P.drag=null;p.open=Math.hypot(p.x-p.ox,p.y-p.oy)>140;}
-  }
+    if(inRect(EI,p.x-20,p.y-20,p.w+40,p.h+40)){                      // tap a panel: it slides aside (tap again to put it back)
+      p.open=!p.open;const dir=p.ox+p.w/2<CX?-1:1;p.tx=p.open?clamp(p.ox+dir*(p.w+40),RX+10,RX+RW-p.w-10):p.ox;beep(300,.06,'triangle',.04);break;}}}
+  for(const p of P.panels){const tx=p.tx===undefined?p.ox:p.tx;p.x+=(tx-p.x)*Math.min(1,dt*8);}
   for(const g of P.glyphs){
     if(g.found)continue;
-    const near=EI.on&&Math.hypot(EI.x-g.x,EI.y-g.y)<90&&!covered(P,g);
+    const near=EI.on&&Math.hypot(EI.x-g.x,EI.y-g.y)<100&&!covered(P,g);
     g.hold=near?g.hold+dt:Math.max(0,g.hold-dt*2);
     if(g.hold>.5){g.found=true;ES.found[g.i]=true;esBurst(g.x,g.y,esS().uv,28,380);beep(880,.08,'triangle',.06);setTimeout(()=>beep(1320,.1,'triangle',.05),80);}
   }
@@ -1879,14 +1872,21 @@ const WCOL=['#ff4d5e','#35e0ff','#ffd23f','#4dff9a'];
 function makeWires(){return{type:'wires',left:shuffle([0,1,2,3]),right:shuffle([0,1,2,3]),map:shuffle([0,1,2,3]),conn:{},drag:null};}
 const wL=r=>({x:480,y:340+r*150}),wR=r=>({x:1440,y:340+r*150});
 function updWires(P){
-  if(EI.pressed&&EI.on)for(let r=0;r<4;r++){const p=wL(r);if(P.conn[r]===undefined&&Math.hypot(EI.x-p.x,EI.y-p.y)<70){P.drag=r;beep(420,.05,'square',.03);break;}}
-  if(P.drag!==null&&!EI.down){
-    const r=P.drag;P.drag=null;
-    for(let k=0;k<4;k++){const p=wR(k);if(Math.hypot(EI.x-p.x,EI.y-p.y)<80){
-      if(Object.values(P.conn).includes(k))break;
-      if(P.map[P.left[r]]===P.right[k]){P.conn[r]=k;esBurst(p.x,p.y,WCOL[P.left[r]],30,420);beep(660,.08,'square',.05);setTimeout(()=>beep(990,.1,'square',.04),70);}
-      else esPenalty(5,p.x,p.y);
-      break;}}
+  if(EI.pressed&&EI.on){                                  // tap a cable end, then tap its socket
+    const plug=()=>{for(let r=0;r<4;r++){const p=wL(r);if(P.conn[r]===undefined&&Math.hypot(EI.x-p.x,EI.y-p.y)<90)return r;}return -1;};
+    if(P.drag===null){const r=plug();if(r>=0){P.drag=r;beep(420,.05,'square',.03);}}
+    else{
+      let done=false;
+      for(let k=0;k<4;k++){const p=wR(k);if(Math.hypot(EI.x-p.x,EI.y-p.y)<100){
+        if(!Object.values(P.conn).includes(k)){
+          const r=P.drag;
+          if(P.map[P.left[r]]===P.right[k]){P.conn[r]=k;esBurst(p.x,p.y,WCOL[P.left[r]],30,420);beep(660,.08,'square',.05);setTimeout(()=>beep(990,.1,'square',.04),70);}
+          else esPenalty(5,p.x,p.y);
+          P.drag=null;
+        }
+        done=true;break;}}
+      if(!done){const r=plug();P.drag=r>=0?r:null;}        // tapping another cable switches to it, empty space cancels
+    }
   }
   return Object.keys(P.conn).length===4;
 }
@@ -1970,7 +1970,7 @@ function drawTune(P,t){
     ctx.strokeStyle=C.text;ctx.lineWidth=10;ctx.lineCap='round';ctx.beginPath();ctx.moveTo(k.x,k.y);ctx.lineTo(k.x+Math.cos(ang)*80,k.y+Math.sin(ang)*80);ctx.stroke();
     txt(k.label,k.x,k.y+160,22,S0.col,'center',700);
   }
-  txt('Pinch a dial,',CX,700,24,C.dim,'center',500);txt('then move up or down',CX,732,24,C.dim,'center',500);
+  txt('Hold on a dial to grab it,',CX,690,22,C.dim,'center',500);txt('move up or down, hold still to let go',CX,722,22,C.dim,'center',500);
 }
 
 /* ---------------- puzzle 4: keypad + lever ---------------- */
@@ -1989,12 +1989,14 @@ function updKeypad(P,dt){
       }
       break;}}
   }else if(P.phase==='pump'){
-    P.pr=Math.max(0,P.pr-dt*.07);P.pump=Math.max(0,(P.pump||0)-dt*4);
-    if(EI.pressed&&EI.on){P.pr=Math.min(1,P.pr+.11);P.pump=1;beep(160+P.pr*300,.12,'sawtooth',.05);esBurst(CX,RY+560,esS().col,10,260);}
+    P.pr=Math.max(0,P.pr-dt*.05);P.pump=Math.max(0,(P.pump||0)-dt*4);
+    const dy=(EI.on&&P.ly!==undefined)?Math.abs(EI.y-P.ly):0;P.ly=EI.on?EI.y:undefined;   // pump by moving your hand up and down
+    if(dy>6){P.pr=Math.min(1,P.pr+Math.min(.045,dy/2000));P.pump=1;if(Math.random()<.25){beep(160+P.pr*300,.08,'sawtooth',.04);esBurst(CX,RY+560,esS().col,6,240);}}
+    if(EI.pressed&&EI.on){P.pr=Math.min(1,P.pr+.11);P.pump=1;beep(160+P.pr*300,.12,'sawtooth',.05);}
     if(P.pr>=1)return true;
   }else{
     const hx=460+P.lever*1000,hy=640;
-    if(EI.pressed&&EI.on&&Math.hypot(EI.x-hx,EI.y-hy)<110)P.drag=true;
+    if(EI.pressed&&EI.on&&Math.hypot(EI.x-hx,EI.y-hy)<130)P.drag=true;
     if(P.drag){if(!EI.down)P.drag=false;else P.lever=clamp((EI.x-460)/1000,0,1);}
     else if(P.lever<1)P.lever=Math.max(0,P.lever-dt*.8);
     if(P.lever>.97)return true;
@@ -2015,10 +2017,10 @@ function drawKeypad(P,t){
     for(let k=0;k<4;k++){const x=1250+k*140,y=RY+240;
       ctx.fillStyle=S0.uv;for(let j=0;j<=k;j++){ctx.beginPath();ctx.arc(x+50-(k*10)+j*20,y-60,6,0,7);ctx.fill();}
       txt(String(ES.code[k]),x+50,y+30,90,C.text,'center',700);}
-    wrap('The dots show the order. Pinch the keys to type the code.',1460,RY+420,480,26,36,'#a9c4e6','center');
+    wrap('The dots show the order. Hold your hand on each key to type the code.',1460,RY+420,480,26,36,'#a9c4e6','center');
   }else if(P.phase==='pump'){
     txt(S0.lever,CX,RY+130,60,S0.acc,'center',700);
-    txt('Pinch again and again to build pressure',CX,RY+190,28,C.text,'center',500);
+    txt('Move your hand up and down quickly to build pressure',CX,RY+190,28,C.text,'center',500);
     const bx=CX-60,by=RY+300,ph=P.pump||0;
     ctx.fillStyle='#33415e';rr(bx-40,by+60,200,340,20);ctx.fill();
     ctx.fillStyle='#8fa0c4';ctx.fillRect(bx+50,by-40+ph*70,20,140);
@@ -2029,7 +2031,7 @@ function drawKeypad(P,t){
     txt(Math.round(P.pr*100)+'%',gx,gy+18,56,C.text,'center',700);txt('PRESSURE',gx,gy+70,20,S0.col,'center',700);
   }else{
     txt(S0.lever,CX,RY+150,64,S0.acc,'center',700);
-    txt('Pinch the handle and drag it all the way to the right',CX,RY+210,28,C.text,'center',500);
+    txt('Hold on the handle to grab it, carry it all the way to the right',CX,RY+210,28,C.text,'center',500);
     const y=640;rr(440,y-40,1040,80,40);ctx.fillStyle='rgba(5,12,28,.92)';ctx.fill();ctx.lineWidth=4;ctx.strokeStyle=S0.col;ctx.stroke();
     rr(440,y-40,40+P.lever*1000,80,40);ctx.fillStyle=S0.acc;ctx.globalAlpha=.35;ctx.fill();ctx.globalAlpha=1;
     for(let i=0;i<8;i++){const x=560+i*110+((t*120)%110);if(x<1440)txt('›',x,y+22,64,'rgba(255,255,255,.18)','center',700);}
@@ -2081,7 +2083,7 @@ function updPipes(P,dt){
 }
 function drawPipes(P,t){
   const S0=esS(),{sz,x0,y0}=pipeGeo(P);
-  txt('COOLANT ROUTING  ·  pinch a tile to turn it',CX,RY+80,24,S0.col,'center',700);
+  txt('COOLANT ROUTING  ·  hold your hand on a tile to turn it',CX,RY+80,24,S0.col,'center',700);
   // inlet and reactor
   ctx.save();ctx.shadowColor=S0.col;ctx.shadowBlur=24;ctx.fillStyle=S0.col;rr(x0-110,y0+P.s*sz+sz/2-32,90,64,14);ctx.fill();ctx.restore();
   txt('COOLANT',x0-65,y0+P.s*sz+sz/2+60,16,S0.col,'center',700);
@@ -2138,7 +2140,7 @@ function updMirrors(P,dt){
 }
 function drawMirrors(P,t){
   const S0=esS(),{sz,x0,y0}=mirGeo(P);
-  txt('LASER CALIBRATION  ·  pinch a mirror to flip it',CX,RY+56,24,S0.col,'center',700);
+  txt('LASER CALIBRATION  ·  hold your hand on a mirror to flip it',CX,RY+56,24,S0.col,'center',700);
   rr(x0-10,y0-10,P.cols*sz+20,P.rows*sz+20,18);ctx.fillStyle='rgba(5,12,28,.85)';ctx.fill();ctx.lineWidth=2;ctx.strokeStyle='rgba(53,224,255,.3)';ctx.stroke();
   ctx.strokeStyle='rgba(255,255,255,.05)';ctx.lineWidth=1;ctx.beginPath();
   for(let i=1;i<P.cols;i++){ctx.moveTo(x0+i*sz,y0);ctx.lineTo(x0+i*sz,y0+P.rows*sz);}for(let i=1;i<P.rows;i++){ctx.moveTo(x0,y0+i*sz);ctx.lineTo(x0+P.cols*sz,y0+i*sz);}ctx.stroke();
@@ -2213,11 +2215,11 @@ function makePattern(){
 }
 function updPattern(P,dt){
   P.err=Math.max(0,P.err-dt);P.glimpse+=dt;
-  const near=()=>{for(let i=0;i<9;i++){const p=patPos(i);if(Math.hypot(EI.x-p.x,EI.y-p.y)<60)return i;}return -1;};
+  const near=()=>{for(let i=0;i<9;i++){const p=patPos(i);if(Math.hypot(EI.x-p.x,EI.y-p.y)<70)return i;}return -1;};
   if(EI.pressed&&EI.on){const i=near();if(i>=0){P.drawing=true;P.path=[i];beep(600,.04,'sine',.04);}}
   if(P.drawing){
     if(EI.down){const i=near();if(i>=0&&!P.path.includes(i)){P.path.push(i);beep(600+P.path.length*80,.04,'sine',.04);}}
-    else{P.drawing=false;
+    else{P.drawing=false;                                  // hold still at the last dot to finish
       if(P.path.join()===P.seq.join())return true;
       if(P.path.length>1){P.err=.8;esPenalty(5,CX,RY+440);}P.path=[];}
   }
@@ -2225,7 +2227,7 @@ function updPattern(P,dt){
 }
 function drawPattern(P,t){
   const S0=esS();
-  txt('BIOMETRIC PATTERN LOCK  ·  pinch and draw through the dots',CX,RY+80,24,S0.col,'center',700);
+  txt('BIOMETRIC PATTERN LOCK  ·  hold on a dot, sweep through the pattern, hold still at the end',CX,RY+80,24,S0.col,'center',700);
   // NOVA's leaking screen shows the pattern for a moment every few seconds
   const sx=1380,sy=RY+170,show=(P.glimpse%5)<1.3;
   rr(sx,sy,360,360,20);ctx.fillStyle='rgba(18,8,34,.95)';ctx.fill();ctx.lineWidth=2;ctx.strokeStyle=S0.col;ctx.stroke();
@@ -2248,9 +2250,9 @@ function drawPattern(P,t){
 function makeOverride(){return{type:'override',x:CX,y:RY+560,grab:false,charge:0,hitT:0};}
 function updOverride(P,dt,t){
   P.hitT=Math.max(0,P.hitT-dt);
-  if(EI.pressed&&EI.on&&Math.hypot(EI.x-P.x,EI.y-P.y)<90)P.grab=true;
-  if(P.grab&&!EI.down)P.grab=false;
-  if(P.grab){P.x=clamp(EI.x,RX+80,RX+RW-80);P.y=clamp(EI.y,RY+180,RY+RH-60);}
+  const d=EI.on?Math.hypot(EI.x-P.x,EI.y-P.y):9999;
+  P.grab=d<(P.grab?450:120);                               // hover to grab: no click needed
+  if(P.grab){P.x+=(clamp(EI.x,RX+80,RX+RW-80)-P.x)*Math.min(1,dt*14);P.y+=(clamp(EI.y,RY+180,RY+RH-60)-P.y)*Math.min(1,dt*14);}
   const ex=CX,ey=RY+70,ang=Math.PI/2+Math.sin(t*.9)*1.15,ba=Math.atan2(P.y-ey,P.x-ex);
   const inBeam=Math.abs(ba-ang)<.07;
   if(inBeam&&P.hitT<=0){P.charge=Math.max(0,P.charge-.15);P.hitT=1.2;ES.shake=.3;sfx.hit();esBurst(P.x,P.y,C.red,20,300);}
@@ -2261,7 +2263,7 @@ function updOverride(P,dt,t){
 }
 function drawOverride(P,t){
   const S0=esS(),ex=CX,ey=RY+70;
-  txt('OVERRIDE  ·  pinch the core, keep holding, stay out of the red beam',CX,RY+RH-24,22,C.dim,'center',600);
+  txt('OVERRIDE  ·  hold your hand on the core and keep it out of the red beam',CX,RY+RH-24,22,C.dim,'center',600);
   ctx.save();ctx.translate(ex,ey);ctx.rotate(P.ang);
   const g=ctx.createLinearGradient(0,0,1400,0);g.addColorStop(0,'rgba(255,60,80,.6)');g.addColorStop(1,'rgba(255,60,80,0)');
   ctx.fillStyle=g;ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(1400,-120);ctx.lineTo(1400,120);ctx.closePath();ctx.fill();ctx.restore();
@@ -2273,7 +2275,7 @@ function drawOverride(P,t){
   ctx.strokeStyle='rgba(255,255,255,.15)';ctx.lineWidth=10;ctx.beginPath();ctx.arc(P.x,P.y,r,0,7);ctx.stroke();
   ctx.strokeStyle=S0.acc;ctx.beginPath();ctx.arc(P.x,P.y,r,-Math.PI/2,-Math.PI/2+Math.PI*2*P.charge);ctx.stroke();
   txt(Math.round(P.charge*100)+'%',P.x,P.y+12,34,'#120822','center',700);
-  if(!P.grab)txt('PINCH TO GRAB',P.x,P.y-r-20,20,S0.acc,'center',700);
+  if(!P.grab)txt('MOVE YOUR HAND HERE',P.x,P.y-r-20,20,S0.acc,'center',700);
 }
 
 /* ---------------- ABYSS: close the leaking valves ---------------- */
@@ -2281,19 +2283,20 @@ function makeValves(){return{type:'valves',v:[0,1,2].map(i=>({x:CX-460+i*460,y:R
 function updValves(P,dt){
   for(const v of P.v){
     if(v.turn>=1)continue;
-    if(EI.pressed&&EI.on&&Math.hypot(EI.x-v.x,EI.y-v.y)<170){v.drag=true;v.last=Math.atan2(EI.y-v.y,EI.x-v.x);}
-    if(v.drag){
-      if(!EI.down){v.drag=false;continue;}
-      const a=Math.atan2(EI.y-v.y,EI.x-v.x);let d=a-v.last;if(d>Math.PI)d-=Math.PI*2;if(d<-Math.PI)d+=Math.PI*2;v.last=a;
-      if(Math.abs(d)>.01){v.turn=Math.min(1,v.turn+Math.abs(d)/(Math.PI*2.5));if(Math.random()<.3)beep(180+v.turn*200,.04,'sawtooth',.02);}
-      if(v.turn>=1){v.drag=false;esBurst(v.x,v.y,esS().col,30,420);sfx.gear();}
-    }
+    const dd=EI.on?Math.hypot(EI.x-v.x,EI.y-v.y):9999;
+    if(dd>40&&dd<250){                                     // just circle your hand around the wheel, no click needed
+      const a=Math.atan2(EI.y-v.y,EI.x-v.x);
+      if(!v.drag){v.drag=true;v.last=a;}
+      else{let d=a-v.last;if(d>Math.PI)d-=Math.PI*2;if(d<-Math.PI)d+=Math.PI*2;v.last=a;
+        if(Math.abs(d)>.01){v.turn=Math.min(1,v.turn+Math.abs(d)/(Math.PI*2.5));if(Math.random()<.3)beep(180+v.turn*200,.04,'sawtooth',.02);}
+        if(v.turn>=1){v.drag=false;esBurst(v.x,v.y,esS().col,30,420);sfx.gear();}}
+    }else v.drag=false;
   }
   return P.v.every(v=>v.turn>=1);
 }
 function drawValves(P,t){
   const S0=esS();
-  txt('CLOSE THE LEAKS  ·  pinch a wheel and circle your hand around it',CX,RY+80,24,S0.col,'center',700);
+  txt('CLOSE THE LEAKS  ·  circle your hand around each wheel',CX,RY+80,24,S0.col,'center',700);
   for(const v of P.v){
     const done=v.turn>=1;
     ctx.strokeStyle='#33415e';ctx.lineWidth=60;ctx.beginPath();ctx.moveTo(v.x,v.y+60);ctx.lineTo(v.x,RY+RH-20);ctx.stroke();
@@ -2312,14 +2315,15 @@ function drawValves(P,t){
 }
 
 /* ---------------- ABYSS: sonar search for the launch code ---------------- */
-function makeSonar(){
+function makeSonar(){const pt0=0;
   const pts=[];while(pts.length<4){const x=rand(RX+160,RX+RW-160),y=rand(RY+180,RY+RH-110);if(pts.every(p=>Math.hypot(p.x-x,p.y-y)>300))pts.push({x,y});}
   const buoys=pts.map((p,i)=>({i,d:ES.code[i],x:p.x,y:p.y,seen:0,found:false,hold:0}));
   const fish=Array.from({length:9},()=>({x:rand(RX+80,RX+RW-80),y:rand(RY+160,RY+RH-80),seen:0,s:rand(.6,1.2)}));
-  return{type:'sonar',buoys,fish,pings:[]};
+  return{type:'sonar',buoys,fish,pings:[],pt:pt0};
 }
 function updSonar(P,dt){
-  if(EI.pressed&&EI.on){P.pings.push({x:EI.x,y:EI.y,r:0});beep(1100,.25,'sine',.05);setTimeout(()=>beep(700,.4,'sine',.03),220);}
+  P.pt-=dt;                                              // the sonar pings by itself while your hand is in the water
+  if(EI.on&&(EI.pressed||P.pt<=0)){P.pings.push({x:EI.x,y:EI.y,r:0});P.pt=1.3;beep(1100,.25,'sine',.05);setTimeout(()=>beep(700,.4,'sine',.03),220);}
   for(const p of P.pings){p.r+=dt*650;for(const b of P.buoys.concat(P.fish))if(Math.abs(Math.hypot(b.x-p.x,b.y-p.y)-p.r)<30)b.seen=4;}
   P.pings=P.pings.filter(p=>p.r<700);
   for(const b of P.buoys.concat(P.fish))b.seen=Math.max(0,b.seen-dt);
@@ -2348,7 +2352,7 @@ function drawSonar(P,t){
     ctx.globalAlpha=1;
   }
   if(EI.on){ctx.strokeStyle=S0.col;ctx.lineWidth=2;ctx.globalAlpha=.6;ctx.beginPath();ctx.arc(EI.x,EI.y,70,0,7);ctx.stroke();ctx.globalAlpha=1;}
-  txt('SONAR  ·  pinch to send a ping, then hold your hand on each glowing buoy',CX,RY+RH-24,22,C.dim,'center',600);
+  txt('SONAR  ·  your hand sends pings; hold it on each glowing buoy',CX,RY+RH-24,22,C.dim,'center',600);
 }
 
 /* ---------------- full-body puzzles (body tracking takes over for these stages) ---------------- */
@@ -2494,15 +2498,30 @@ function drawSwim(Q,t){
   const hint=bodyHint(performance.now()/1000);if(hint)txt(hint+(camMode()?'':'  (click to swim)'),CX,RY+RH-30,22,C.orange,'center',600);
 }
 
+const hotCircle=(x,y,px,py,r)=>Math.hypot(px-x,py-y)<r?{x,y}:null;
+const HOT={
+  scan:(P,x,y)=>{for(const p of P.panels)if(inRect({on:true,x,y},p.x-30,p.y-30,p.w+60,p.h+60))return{x:p.x+p.w/2,y:p.y+p.h/2};return null;},
+  wires:(P,x,y)=>{for(let r=0;r<4;r++){const a=wL(r);if(P.conn[r]===undefined){const c=hotCircle(a.x,a.y,x,y,110);if(c)return c;}
+    const b=wR(r);const c2=hotCircle(b.x,b.y,x,y,110);if(c2)return c2;}return null;},
+  tune:(P,x,y)=>{for(const k of knobs){const c=hotCircle(k.x,k.y,x,y,150);if(c)return c;}return null;},
+  pipes:(P,x,y)=>{const {sz,x0,y0}=pipeGeo(P),cx=Math.floor((x-x0)/sz),cy=Math.floor((y-y0)/sz);
+    return cx>=0&&cx<P.cols&&cy>=0&&cy<P.rows?{x:x0+cx*sz+sz/2,y:y0+cy*sz+sz/2}:null;},
+  mirrors:(P,x,y)=>{const {sz,x0,y0}=mirGeo(P);for(const m of P.mirrors){const c=hotCircle(x0+m.x*sz+sz/2,y0+m.y*sz+sz/2,x,y,sz*.6);if(c)return c;}return null;},
+  memory:(P,x,y)=>{if(P.phase!=='input')return null;for(let i=0;i<6;i++){const p=memPos(i),c=hotCircle(p.x,p.y,x,y,100);if(c)return c;}return null;},
+  pattern:(P,x,y)=>{for(let i=0;i<9;i++){const p=patPos(i),c=hotCircle(p.x,p.y,x,y,80);if(c)return c;}return null;},
+  keypad:(P,x,y)=>{if(P.phase==='code'){for(let i=0;i<12;i++){const r=keyRect(i);if(inRect({on:true,x,y},r.x-14,r.y-14,r.w+28,r.h+28))return{x:r.x+r.w/2,y:r.y+r.h/2};}return null;}
+    if(P.phase==='lever')return hotCircle(460+P.lever*1000,640,x,y,170);return null;}
+};
 const PUZZLES={
-  scan:{make:makeScan,upd:updScan,draw:drawScan},wires:{make:makeWires,upd:updWires,draw:drawWires},
-  tune:{make:makeTune,upd:updTune,draw:drawTune},keypad:{make:makeKeypad,upd:updKeypad,draw:drawKeypad},
-  pipes:{make:makePipes,upd:updPipes,draw:drawPipes},mirrors:{make:makeMirrors,upd:updMirrors,draw:drawMirrors},
-  memory:{make:makeMemory,upd:updMemory,draw:drawMemory},pattern:{make:makePattern,upd:updPattern,draw:drawPattern},
-  override:{make:makeOverride,upd:updOverride,draw:drawOverride},valves:{make:makeValves,upd:updValves,draw:drawValves},
-  sonar:{make:makeSonar,upd:updSonar,draw:drawSonar},
-  balance:{make:makeBalance,upd:updBalance,draw:drawBalance,body:true},bodyscan:{make:makeBodyScan,upd:updBodyScan,draw:drawBodyScan,body:true},
-  swim:{make:makeSwim,upd:updSwim,draw:drawSwim,body:true}};
+  scan:{make:makeScan,upd:updScan,draw:drawScan,mode:'tap',hot:HOT.scan},wires:{make:makeWires,upd:updWires,draw:drawWires,mode:'tap',hot:HOT.wires},
+  tune:{make:makeTune,upd:updTune,draw:drawTune,mode:'carry',hot:HOT.tune},
+  keypad:{make:makeKeypad,upd:updKeypad,draw:drawKeypad,mode:P=>P.phase==='code'?'tap':P.phase==='lever'?'carry':'hover',hot:HOT.keypad},
+  pipes:{make:makePipes,upd:updPipes,draw:drawPipes,mode:'tap',hot:HOT.pipes},mirrors:{make:makeMirrors,upd:updMirrors,draw:drawMirrors,mode:'tap',hot:HOT.mirrors},
+  memory:{make:makeMemory,upd:updMemory,draw:drawMemory,mode:'tap',hot:HOT.memory},pattern:{make:makePattern,upd:updPattern,draw:drawPattern,mode:'carry',hot:HOT.pattern},
+  override:{make:makeOverride,upd:updOverride,draw:drawOverride,mode:'hover'},valves:{make:makeValves,upd:updValves,draw:drawValves,mode:'hover'},
+  sonar:{make:makeSonar,upd:updSonar,draw:drawSonar,mode:'hover'},
+  balance:{make:makeBalance,upd:updBalance,draw:drawBalance,body:true,mode:'body'},bodyscan:{make:makeBodyScan,upd:updBodyScan,draw:drawBodyScan,body:true,mode:'body'},
+  swim:{make:makeSwim,upd:updSwim,draw:drawSwim,body:true,mode:'body'}};
 /* ---------------- update ---------------- */
 function esUpdate(dt,t){
   ES.lt+=dt;const L=ES.lines[ES.li];
@@ -2570,18 +2589,11 @@ function esNarrator(t){
   wrap(shown+(Math.floor(t*3)%2&&shown.length<L.length?'▌':''),460,H-74,1100,28,34,C.text,'left');
 }
 function esHandView(x,y,w,h){
-  ctx.save();rr(x,y,w,h,14);ctx.clip();ctx.fillStyle='#050b16';ctx.fillRect(x,y,w,h);
-  if(camOK&&video.readyState>=2){ctx.save();ctx.translate(x+w,y);ctx.scale(-1,1);ctx.globalAlpha=.55;ctx.drawImage(video,0,0,w,h);ctx.restore();}
-  if(HD.lm){
-    const lm=HD.lm,pt=i=>[x+(1-lm[i].x)*w,y+lm[i].y*h];
-    ctx.strokeStyle=esS().col;ctx.lineWidth=2;
-    for(const f of [[0,1,2,3,4],[0,5,6,7,8],[5,9,10,11,12],[9,13,14,15,16],[13,17,18,19,20],[0,17]]){ctx.beginPath();for(const i of f){const p=pt(i);ctx.lineTo(p[0],p[1]);}ctx.stroke();}
-    for(const i of [4,8]){const p=pt(i);ctx.fillStyle=HD.pinch?C.green:C.orange;ctx.beginPath();ctx.arc(p[0],p[1],5,0,7);ctx.fill();}
-  }
-  ctx.restore();rr(x,y,w,h,14);ctx.lineWidth=2;ctx.strokeStyle=HD.ok?(HD.pinch?C.green:esS().col):'#2b3d5c';ctx.stroke();
-  const s=!camOK?'Mouse mode':handLoading?'Loading hands…':HD.ok?(HD.pinch?'PINCHING':'Open hand'):'Show your hand';
-  if(HD.ok){rr(x+w-34,y+10,24,h-20,12);ctx.fillStyle='rgba(255,255,255,.1)';ctx.fill();const hh=(h-20)*HD.close;rr(x+w-34,y+h-10-hh,24,hh,12);ctx.fillStyle=HD.pinch?C.green:esS().col;ctx.fill();}
-  txt(s,x+10,y+h-10,16,HD.ok?C.green:C.dim,'left',700);
+  drawCam(x,y,w,h,false);
+  const on=HD.ok&&performance.now()/1000-HD.seen<.5;
+  const s=!camOK?'Mouse mode':!landmarker?'Starting camera…':!P.ok?'Step into view':on?(P.handSide==='L'?'LEFT hand':'RIGHT hand'):'Raise one hand';
+  rr(x+6,y+h-34,w-12,26,13);ctx.fillStyle='rgba(7,9,13,.7)';ctx.fill();
+  utxt(s,x+w/2,y+h-15,15,on?UI.goldL:UI.mute,'center',800,2);
 }
 function esHUD(t){
   const S0=esS(),left=esLeft(),danger=left<60;
@@ -2640,8 +2652,8 @@ function esDrawMenu(t){
   const ph=(Math.sin(t*3)+1)/2;ctx.save();ctx.translate(260,915);ctx.strokeStyle=C.cyan;ctx.lineWidth=8;ctx.lineCap='round';
   ctx.beginPath();ctx.moveTo(-40,40);ctx.lineTo(-20+ph*14,-30+ph*20);ctx.stroke();ctx.beginPath();ctx.moveTo(-40,40);ctx.lineTo(40-ph*20,10-ph*10);ctx.stroke();
   if(ph>.85){ctx.fillStyle=C.green;ctx.beginPath();ctx.arc(-4,-6,12,0,7);ctx.fill();}ctx.restore();
-  txt('Pinch thumb + index finger to click. Keep pinching to drag.',360,900,32,C.text,'left',600);
-  const st=!camOK?'No camera: use the mouse (click and drag).':ES.handErr?ES.handErr:handLoading?'Loading hand tracking…':!handLM?'Hand tracking starting…':HD.ok?'Hand detected. Pinch a mission to start.':'Show one hand to the camera, about 1 to 1.5 m away.';
+  txt('Point with one hand and hold still for a second to click.',360,900,32,C.text,'left',600);
+  const st=!camOK?'No camera: use the mouse (click and drag).':!landmarker?'Starting camera…':HD.ok?'Pointing with your '+(P.handSide==='L'?'left':'right')+' hand. Hold on a mission to start.':'Stand 1 to 2 metres away and raise one hand.';
   txt(st,360,948,26,HD.ok?C.green:C.orange,'left',600);
   esHandView(1560,856,230,118);
   rcBtn('menu','Back to menu',W-330,1000,300,70,true,false);
@@ -2666,7 +2678,7 @@ function esDrawIntro(t){
   txt('MISSION TIME  '+fmtMS(ES_DUR),CX,470,30,C.text,'center',600);ctx.globalAlpha=1;
   ES.lines.forEach((l,i)=>{if(i>ES.li)return;const s=i<ES.li?l:l.slice(0,Math.floor(ES.lt*34));txt(s,CX,580+i*56,36,i===ES.li?C.text:'#8fb0d6','center',500);});
   if(stateT>2)rcBtn('es:go','Start mission',CX-260,800,520,120,true,true);
-  txt('Pinch the button, or it starts by itself',CX,960,24,C.dim,'center',500);
+  txt('Hold your hand on the button, or it starts by itself',CX,960,24,C.dim,'center',500);
   esHandView(40,H-160,230,130);
 }
 function esDrawPlay(t){
@@ -2799,12 +2811,11 @@ function drawOutro(t){
 }
 
 /* =====================================================================
-   VISITOR SHELL: pinch to select everywhere, welcome screen, menu and the
+   VISITOR SHELL: point and hold still to select everywhere, welcome screen, menu and the
    shared look (gold on deep graphite, matching the SPACElogic logo).
    ===================================================================== */
 const FONT_UI="'Manrope','Chakra Petch',system-ui,sans-serif";
 const UI={gold:'#cf8c2a',goldL:'#ebbd6e',ivory:'#f4efe6',mute:'#9aa0a9',faint:'#5d636c',glass:'rgba(255,255,255,.05)',line:'rgba(255,255,255,.12)'};
-const HAND_UI=['home','menu','over','fsover','lobby','rresult','outro'];       // screens driven by the hand + pinch
 function utxt(s,x,y,size,col=UI.ivory,align='left',weight=600,ls=0){
   ctx.font=`${weight} ${size}px ${FONT_UI}`;ctx.letterSpacing=ls+'px';ctx.fillStyle=col;ctx.textAlign=align;ctx.textBaseline='alphabetic';
   ctx.fillText(s,x,y);ctx.letterSpacing='0px';
@@ -2817,49 +2828,78 @@ function uwrap(s,x,y,maxW,size,lh,col,align='left',weight=500){
 const ripples=[];let fadeT=0,hoverId=null,lastActive=0;
 
 /* one input for every screen: mouse, or the tracked hand (pinch = press) */
+/* DWELL CLICKING (works from 1 to 3 m, no fingers needed)
+   tap puzzles:   hold your hand still on something for 0.65 s = a click
+   carry puzzles: hold still on a handle to grab it (0.55 s), move it, hold still again (0.9 s) to let go
+   hover puzzles: no click at all, the hand just has to be in the right place */
+const DW={ax:0,ay:0,t:0,fired:false,carry:false,p:0};
+function esMode(){
+  if(state!=='esplay'||!ES.P||ES.clear>0)return null;
+  const m=PUZZLES[ES.P.type].mode;return typeof m==='function'?m(ES.P):(m||'tap');
+}
+function esHot(x,y){                                    // the interactive thing under the cursor (centre point), if any
+  if(state!=='esplay'||!ES.P||ES.clear>0)return null;
+  const f=PUZZLES[ES.P.type].hot;return f?f(ES.P,x,y):null;
+}
+function handDwell(dt){
+  const mode=esMode();DW.p=0;
+  if(!mode||mode==='hover'||mode==='body'){DW.carry=false;DW.t=0;DW.fired=false;EI.down=false;return;}
+  const hot=DW.carry?null:esHot(EI.x,EI.y);
+  if(hot){EI.x+=(hot.x-EI.x)*.5;EI.y+=(hot.y-EI.y)*.5;}                          // magnet: jitter cannot knock you off a target
+  const d=Math.hypot(EI.x-DW.ax,EI.y-DW.ay);
+  if(d>(DW.carry?80:60)){DW.ax=EI.x;DW.ay=EI.y;DW.t=0;DW.fired=false;}
+  else if(DW.carry||hot||!PUZZLES[ES.P.type].hot)DW.t+=dt;else DW.t=0;
+  if(mode==='tap'){
+    const need=DW.fired?1.3:.65;DW.p=clamp(DW.t/need,0,1);EI.down=false;
+    if(DW.t>=need){EI.down=true;DW.t=0;DW.fired=true;beep(900,.05,'sine',.04);}
+  }else{                                                                            // carry
+    const need=DW.carry?.9:.55;DW.p=clamp(DW.t/need,0,1);
+    if(DW.t>=need){DW.t=0;
+      if(DW.carry){DW.carry=false;beep(500,.06,'sine',.04);}
+      else if(hot){DW.carry=true;beep(1000,.06,'sine',.05);}}
+    EI.down=DW.carry;
+  }
+}
 function uiInput(t,dt){
   const prev=EI.down,handOn=HD.ok&&t-HD.seen<.5;
-  if(mouseDown||t-mouse.t<3){EI.x=mouse.x;EI.y=mouse.y;EI.on=true;EI.down=mouseDown;EI.src='mouse';}
-  else if(handOn){EI.x=HD.x;EI.y=HD.y;EI.on=true;EI.down=HD.pinch;EI.src='hand';
-    if(!ES_STATES.includes(state)||state==='esmenu'||state==='esresult'){const b=btnAt(EI,40);
-      if(b&&b.w<W-10){const cx=b.x+b.w/2,cy=b.y+b.h/2;EI.x+=(cx-EI.x)*.35;EI.y+=(cy-EI.y)*.35;}}}   // gentle magnet to buttons
-  else{EI.on=false;EI.down=false;EI.src='none';}
+  if(mouseDown||t-mouse.t<3){EI.x=mouse.x;EI.y=mouse.y;EI.on=true;EI.down=mouseDown;EI.src='mouse';DW.carry=false;}
+  else if(handOn){
+    EI.x=HD.x;EI.y=HD.y;EI.on=true;EI.src='hand';
+    const b=esMode()?null:btnAt(EI,50);                                             // gentle magnet to buttons on menu screens
+    if(b&&b.w<W-10){EI.x+=(b.x+b.w/2-EI.x)*.35;EI.y+=(b.y+b.h/2-EI.y)*.35;}
+    handDwell(dt);
+  }
+  else{EI.on=false;EI.down=false;EI.src='none';DW.carry=false;DW.t=0;}
   EI.pressed=EI.down&&!prev;EI.released=!EI.down&&prev;
   if(EI.pressed&&EI.on)ripples.push({x:EI.x,y:EI.y,t:0});
   for(const r of ripples)r.t+=dt;while(ripples.length&&ripples[0].t>.6)ripples.shift();
-  if(EI.pressed&&EI.src==='hand'&&lock<=0){
-    const b=btnAt(EI,40);
-    if(b){press(b.id);EI.pressed=false;}
-    else if(state==='home'){press('home:go');EI.pressed=false;}
-  }
 }
 function btnAt(p,pad=0){for(const b of buttons)if(b.on&&p.x>=b.x-pad&&p.x<=b.x+b.w+pad&&p.y>=b.y-pad&&p.y<=b.y+b.h+pad)return b;return null;}
 
-function drawPinchGlyph(x,y,s,ph,col){                   // two fingertips closing together, ph 0..1
-  ctx.save();ctx.translate(x,y);ctx.scale(s,s);ctx.lineCap='round';ctx.strokeStyle=col;
-  const gap=22*(1-ph);
-  ctx.lineWidth=13;ctx.beginPath();ctx.moveTo(-46,-44);ctx.quadraticCurveTo(-36,-8,-8-gap*.5,-4-gap*.6);ctx.stroke();   // index finger
-  ctx.beginPath();ctx.moveTo(-40,46);ctx.quadraticCurveTo(-10,30,-4+gap*.5,4+gap*.6);ctx.stroke();                       // thumb
-  ctx.lineWidth=13;ctx.globalAlpha=.35;ctx.beginPath();ctx.moveTo(-46,-44);ctx.quadraticCurveTo(-70,0,-40,46);ctx.stroke();ctx.globalAlpha=1;
-  if(ph>.8){ctx.fillStyle=UI.goldL;ctx.shadowColor=UI.gold;ctx.shadowBlur=20;ctx.beginPath();ctx.arc(-6,0,9,0,7);ctx.fill();
-    ctx.shadowBlur=0;ctx.strokeStyle=UI.goldL;ctx.lineWidth=3;for(let k=0;k<6;k++){const a=k*Math.PI/3;ctx.beginPath();ctx.moveTo(-6+Math.cos(a)*16,Math.sin(a)*16);ctx.lineTo(-6+Math.cos(a)*24,Math.sin(a)*24);ctx.stroke();}}
+function drawPinchGlyph(x,y,s,ph,col){                   // a ring that fills: "hold still"
+  ctx.save();ctx.translate(x,y);ctx.scale(s,s);ctx.lineCap='round';
+  ctx.strokeStyle='rgba(255,255,255,.25)';ctx.lineWidth=10;ctx.beginPath();ctx.arc(0,0,44,0,7);ctx.stroke();
+  ctx.strokeStyle=col;ctx.lineWidth=10;ctx.beginPath();ctx.arc(0,0,44,-Math.PI/2,-Math.PI/2+Math.PI*2*ph);ctx.stroke();
+  ctx.fillStyle=col;ctx.beginPath();ctx.arc(0,0,11,0,7);ctx.fill();
   ctx.restore();
 }
-function drawMirror(cx,cy,r,label=true){                   // round live camera view
+function drawMirror(cx,cy,r,label=true){                   // round live camera view of the locked player
   ctx.save();ctx.beginPath();ctx.arc(cx,cy,r,0,7);ctx.clip();ctx.fillStyle='#0b0e14';ctx.fillRect(cx-r,cy-r,2*r,2*r);
-  if(camOK&&video.readyState>=2){const vw=r*2*16/9;ctx.save();ctx.translate(cx+vw/2,cy-r);ctx.scale(-1,1);ctx.globalAlpha=.85;ctx.drawImage(video,0,0,vw,r*2);ctx.restore();}
-  if(HD.lm&&performance.now()/1000-HD.seen<.5){
-    const vw=r*2*16/9,pt=i=>[cx+vw/2-HD.lm[i].x*vw,cy-r+HD.lm[i].y*r*2];
-    ctx.strokeStyle=UI.goldL;ctx.lineWidth=2;
-    for(const f of [[0,1,2,3,4],[0,5,6,7,8],[5,9,10,11,12],[9,13,14,15,16],[13,17,18,19,20],[0,17]]){ctx.beginPath();for(const i of f){const p=pt(i);ctx.lineTo(p[0],p[1]);}ctx.stroke();}
-  }
+  const vw=r*2*16/9,pt=(lm,i)=>[cx+vw/2-lm[i].x*vw,cy-r+lm[i].y*r*2];
+  if(camOK&&video.readyState>=2){ctx.save();ctx.translate(cx+vw/2,cy-r);ctx.scale(-1,1);ctx.globalAlpha=.85;ctx.drawImage(video,0,0,vw,r*2);ctx.restore();}
+  const draw=(lm,col,lw)=>{ctx.strokeStyle=col;ctx.lineWidth=lw;ctx.lineCap='round';
+    for(const [a,b] of CONN){if((lm[a].visibility??1)<.4||(lm[b].visibility??1)<.4)continue;const A=pt(lm,a),B=pt(lm,b);ctx.beginPath();ctx.moveTo(A[0],A[1]);ctx.lineTo(B[0],B[1]);ctx.stroke();}};
+  for(const o of P.others||[])draw(o,'rgba(180,190,205,.4)',2);
+  if(P.lm){draw(P.lm,UI.goldL,3);
+    if(P.curOk&&P.handSide){const q=pt(P.lm,P.handSide==='L'?15:16);ctx.strokeStyle='#fff';ctx.lineWidth=3;ctx.beginPath();ctx.arc(q[0],q[1],r*.16,0,7);ctx.stroke();}}
   ctx.restore();
   const handOn=HD.ok&&performance.now()/1000-HD.seen<.5;
   ctx.save();ctx.shadowColor=handOn?UI.gold:'transparent';ctx.shadowBlur=handOn?24:0;
-  ctx.lineWidth=3;ctx.strokeStyle=handOn?UI.goldL:'rgba(255,255,255,.25)';ctx.beginPath();ctx.arc(cx,cy,r,0,7);ctx.stroke();ctx.restore();
+  ctx.lineWidth=3;ctx.strokeStyle=handOn?UI.goldL:P.ok?'rgba(235,189,110,.5)':'rgba(255,255,255,.25)';ctx.beginPath();ctx.arc(cx,cy,r,0,7);ctx.stroke();ctx.restore();
   if(label){
-    const s=!camOK?'Mouse mode':handOn?(HD.pinch?'Pinch':'Hand found'):handLM?'Show your hand':'Starting camera…';
+    const s=!camOK?'Mouse mode':!landmarker?'Starting camera…':handOn?(P.handSide==='L'?'Left hand':'Right hand'):P.ok?'Raise one hand':'Step in front of the camera';
     utxt(s,cx,cy+r+30,17,handOn?UI.goldL:UI.mute,'center',700,2);
+    if((P.others||[]).length)utxt(`${P.others.length} other ${P.others.length>1?'people':'person'} ignored`,cx,cy+r+54,13,UI.faint,'center',600,1);
   }
 }
 function pill(x,y,w,h,col,fill){rr(x,y,w,h,h/2);ctx.fillStyle=fill;ctx.fill();ctx.lineWidth=1.5;ctx.strokeStyle=col;ctx.stroke();}
@@ -2882,8 +2922,8 @@ function drawHome(t){
   ctx.fillStyle='rgba(255,255,255,.04)';ctx.beginPath();ctx.arc(CX,cy,74,0,7);ctx.fill();
   ctx.strokeStyle=UI.goldL;ctx.lineWidth=2;ctx.beginPath();ctx.arc(CX,cy,74,0,7);ctx.stroke();
   drawPinchGlyph(CX+12,cy,.95,ph,UI.ivory);
-  utxt('Raise your hand and pinch to begin',CX,cy+140,40,UI.ivory,'center',600);
-  utxt(camOK?'Stand about 1.5 metres from the screen  ·  thumb and index finger together':'Click anywhere to begin',CX,cy+184,22,UI.mute,'center',500,1);
+  utxt('Raise one hand to begin',CX,cy+140,40,UI.ivory,'center',600);
+  utxt(camOK?'Stand 1 to 2 metres from the screen  ·  point with one hand and hold still':'Click anywhere to begin',CX,cy+184,22,UI.mute,'center',500,1);
   // games strip
   const sel=Math.floor(t/2.2)%4;
   SHOWCASE.forEach((n,i)=>{const x=CX+(i-1.5)*300,on=i===sel;utxt(n.toUpperCase(),x,H-62,16,on?UI.goldL:UI.faint,'center',700,5);
@@ -2907,7 +2947,7 @@ function drawMenu(t){
   brand(86,128,60);
   utxt('MAKER SPACE ARCADE',W-86,100,17,UI.goldL,'right',700,8);
   const handOn=HD.ok&&t-HD.seen<.5;
-  utxt(handOn?'Hand detected  ·  point and pinch to choose':camOK?'Raise one hand, then pinch to choose':'Click a game to play',W-86,132,18,handOn?UI.ivory:UI.mute,'right',500,1);
+  utxt(handOn?'Hand detected  ·  point at a game and hold still':camOK?'Raise one hand and point at a game':'Click a game to play',W-86,132,18,handOn?UI.ivory:UI.mute,'right',500,1);
   utxt('Choose your experience',CX,258,56,UI.ivory,'center',300,1);
   const cw=410,ch=590,gap=36,x0=(W-(4*cw+3*gap))/2,y0=300;
   GAMES.forEach((g,i)=>{
@@ -2936,13 +2976,13 @@ function drawMenu(t){
     rr(bx,by,bwid,bh,23);
     if(hv>.05){const gg=ctx.createLinearGradient(bx,0,bx+bwid,0);gg.addColorStop(0,'#e3a548');gg.addColorStop(1,'#c9822a');ctx.globalAlpha=hv;ctx.fillStyle=gg;ctx.fill();ctx.globalAlpha=1;}
     ctx.lineWidth=1.5;ctx.strokeStyle=hv>.05?'rgba(255,230,180,.8)':'rgba(255,255,255,.18)';ctx.stroke();
-    const lab=ptr.src==='pinch'||!camOK||ptr.src==='mouse'?(ptr.src==='mouse'?'Click to play':'Pinch to play'):'Hold to play';
+    const lab=ptr.src==='mouse'||!camOK?'Click to play':'Hold to play';
     utxt(lab,bx+bwid/2,by+29,17,hv>.5?'#1d1406':UI.ivory,'center',700,2);
     const p=prog(id);if(p>0){rr(bx,by+bh+8,bwid*p,4,2);ctx.fillStyle=UI.goldL;ctx.fill();}
   });
   drawMirror(118,H-112,62,false);
   drawPinchGlyph(CX-352,H-58,.36,(Math.sin(t*2.6)+1)/2,UI.goldL);
-  utxt('Point at a game, then pinch your thumb and index finger',CX+10,H-52,22,UI.mute,'center',500,1);
+  utxt('Point at a game, then hold still for a second',CX+10,H-52,22,UI.mute,'center',500,1);
   utxt('PRESENTED BY  MAKER SPACE',W-86,H-52,13,UI.faint,'right',700,5);
   if(status)statusChip();
 }
@@ -2967,7 +3007,7 @@ function rcBtn(id,label,x,y,w,h,on,primary,noHand=false){
 function drawExitBtn(){
   if(!EXIT_STATES.includes(state))return;
   const x=W-150,y=H/2-28,w=130,h=56,hv=ptr.on&&inRect(ptr,x-10,y-10,w+20,h+20);
-  addBtn('menu',x,y,w,h,true,esBody());               // during body puzzles a raised arm must not press Exit
+  addBtn('menu',x,y,w,h,true,esBody()||state==='play'||state==='fsplay');   // arms swing near the edge in body games: use Esc / both hands up there
   ctx.save();ctx.globalAlpha=hv?1:.7;
   rr(x,y,w,h,28);ctx.fillStyle='rgba(10,12,18,.82)';ctx.fill();ctx.lineWidth=hv?2.5:1.5;ctx.strokeStyle=hv?UI.goldL:'rgba(255,255,255,.25)';ctx.stroke();
   utxt('✕  Exit',x+w/2,y+36,20,UI.ivory,'center',700,1);
@@ -2983,33 +3023,33 @@ let curR=30;
 function drawRipples(){
   for(const r of ripples){ctx.save();ctx.globalAlpha=1-r.t/.6;ctx.strokeStyle=UI.goldL;ctx.lineWidth=3;ctx.beginPath();ctx.arc(r.x,r.y,24+r.t*120,0,7);ctx.stroke();ctx.restore();}
 }
-function pinchCursor(x,y,col){                           // two arcs close together as the fingers close; solid + label when pinched
-  const t=performance.now()/1000,c=HD.close,down=EI.down,r=46-20*c;
+function dwellCursor(x,y){                              // ring fills while you hold still; solid green while you are carrying something
+  const t=performance.now()/1000,mode=esMode(),inPuz=mode==='tap'||mode==='carry';
+  const col=ES_STATES.includes(state)?esS().col:UI.goldL;
+  let p=hov.id?prog(hov.id):(inPuz?DW.p:0);const carrying=inPuz&&DW.carry;
   ctx.save();ctx.lineCap='round';
-  ctx.fillStyle='rgba(7,9,13,.35)';ctx.beginPath();ctx.arc(x,y,50,0,7);ctx.fill();
-  ctx.lineWidth=6;ctx.strokeStyle='rgba(255,255,255,.18)';ctx.beginPath();ctx.arc(x,y,50,0,7);ctx.stroke();
-  ctx.strokeStyle=down?'#7dffb5':col;ctx.shadowColor=ctx.strokeStyle;ctx.shadowBlur=down?30:14;ctx.lineWidth=down?8:6;
-  const gap=(1-c)*1.1;
-  ctx.beginPath();ctx.arc(x,y,r,-Math.PI/2+gap,Math.PI/2-gap);ctx.stroke();
-  ctx.beginPath();ctx.arc(x,y,r,Math.PI/2+gap,Math.PI*1.5-gap);ctx.stroke();
-  ctx.fillStyle=down?'#7dffb5':'#fff';ctx.beginPath();ctx.arc(x,y,down?12:6,0,7);ctx.fill();
+  ctx.fillStyle='rgba(7,9,13,.4)';ctx.beginPath();ctx.arc(x,y,48,0,7);ctx.fill();
+  ctx.lineWidth=6;ctx.strokeStyle='rgba(255,255,255,.2)';ctx.beginPath();ctx.arc(x,y,48,0,7);ctx.stroke();
+  if(carrying){ctx.strokeStyle='#7dffb5';ctx.shadowColor='#7dffb5';ctx.shadowBlur=26;ctx.lineWidth=8;ctx.beginPath();ctx.arc(x,y,48,0,7);ctx.stroke();ctx.shadowBlur=0;
+    if(p>0){ctx.strokeStyle='#ffffff';ctx.lineWidth=5;ctx.beginPath();ctx.arc(x,y,58,-Math.PI/2,-Math.PI/2+Math.PI*2*p);ctx.stroke();}}
+  else if(p>0){ctx.strokeStyle=UI.goldL;ctx.shadowColor=UI.gold;ctx.shadowBlur=22;ctx.lineWidth=8;ctx.beginPath();ctx.arc(x,y,48,-Math.PI/2,-Math.PI/2+Math.PI*2*p);ctx.stroke();ctx.shadowBlur=0;}
+  else{ctx.strokeStyle=col;ctx.lineWidth=3;ctx.beginPath();ctx.arc(x,y,48+3*Math.sin(t*4),0,7);ctx.stroke();}
+  ctx.fillStyle=carrying?'#7dffb5':'#fff';ctx.beginPath();ctx.arc(x,y,carrying?12:7,0,7);ctx.fill();
   ctx.restore();
-  if(down&&t-HD.pinchT<.6){ctx.globalAlpha=1-(t-HD.pinchT)/.6;utxt('PINCH',x,y-66,18,'#7dffb5','center',800,4);ctx.globalAlpha=1;}
-  else if(!down&&c>.35)utxt('closer…',x,y-66,15,col,'center',700,2);
+  if(carrying)utxt('HOLDING',x,y-72,17,'#7dffb5','center',800,4);
+  else if(p>.15)utxt(inPuz&&mode==='carry'?'GRABBING…':'HOLD…',x,y-72,16,UI.goldL,'center',800,4);
 }
 function drawCursor(){
   if(esBody()&&ptr.src!=='mouse'){drawRipples();return;}
-  if(EI.on&&EI.src==='hand'){pinchCursor(EI.x,EI.y,ES_STATES.includes(state)?esS().col:UI.goldL);
-    if(hov.id){ctx.lineWidth=5;ctx.strokeStyle=UI.gold;ctx.beginPath();ctx.arc(EI.x,EI.y,58,-Math.PI/2,-Math.PI/2+Math.PI*2*prog(hov.id));ctx.stroke();}
-    drawRipples();return;}
+  if(EI.on&&EI.src==='hand'){dwellCursor(EI.x,EI.y);drawRipples();return;}
   if(ES_STATES.includes(state)&&EI.on){esCursor();drawRipples();return;}
   if(!ptr.on){drawRipples();return;}
-  const {x,y}=ptr,down=ptr.src==='pinch'&&EI.down,hv=!!hoverId;
+  const {x,y}=ptr,hv=!!hoverId;
   curR+=((hv?40:28)-curR)*.25;
   ctx.save();ctx.shadowColor='rgba(207,140,42,.8)';ctx.shadowBlur=hv?24:10;
-  ctx.lineWidth=2.5;ctx.strokeStyle=hv?UI.goldL:'rgba(244,239,230,.75)';ctx.beginPath();ctx.arc(x,y,down?curR*.6:curR,0,7);ctx.stroke();
-  if(hov.id&&ptr.src!=='pinch'){ctx.lineWidth=4;ctx.strokeStyle=UI.gold;ctx.beginPath();ctx.arc(x,y,curR,-Math.PI/2,-Math.PI/2+Math.PI*2*clamp(hov.t/CFG.dwell,0,1));ctx.stroke();}
-  ctx.fillStyle=down?UI.goldL:UI.ivory;ctx.beginPath();ctx.arc(x,y,down?11:6,0,7);ctx.fill();
+  ctx.lineWidth=2.5;ctx.strokeStyle=hv?UI.goldL:'rgba(244,239,230,.75)';ctx.beginPath();ctx.arc(x,y,curR,0,7);ctx.stroke();
+  if(hov.id){ctx.lineWidth=4;ctx.strokeStyle=UI.gold;ctx.beginPath();ctx.arc(x,y,curR,-Math.PI/2,-Math.PI/2+Math.PI*2*prog(hov.id));ctx.stroke();}
+  ctx.fillStyle=UI.ivory;ctx.beginPath();ctx.arc(x,y,6,0,7);ctx.fill();
   ctx.restore();
   drawRipples();
 }
@@ -3099,6 +3139,7 @@ addEventListener('keydown',e=>{
 });
 addEventListener('keyup',e=>{if(e.key==='ArrowDown')kb.down=false;});
 
+window.__dbg={P,LOCK,HSEL,DW,HD};   // handy for debugging in the console
 async function goFull(){
   try{if(!document.fullscreenElement)await document.documentElement.requestFullscreen({navigationUI:'hide'});}catch(e){}
 }
@@ -3119,7 +3160,7 @@ document.getElementById('startBtn').addEventListener('click',async()=>{
   if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
   requestAnimationFrame(frame);
   await initCam();
-  if(camOK){await initModel();initHands();}
+  if(camOK)await initModel();
 });
 </script>
 </body>
