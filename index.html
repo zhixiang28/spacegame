@@ -145,7 +145,7 @@ const sfx={
    ===================================================================== */
 let landmarker=null,camOK=false,status='Starting…';
 const P={ok:false,lastSeen:-99,sx:0,sy:0,hx:0,hy:0,shW:.15,torso:.25,hasHips:false,lean:0,
-         cur:{x:.5,y:.5},curOk:false,bothUp:false,lm:null,all:[],others:[],handSide:''};
+         cur:{x:.5,y:.5},curOk:false,bothUp:false,lm:null,all:[],others:[],handSide:'',pose:null,squat:false,jump:false};
 const F={sx:new OneEuro(),sy:new OneEuro(),sw:new OneEuro(),hx:new OneEuro(),hy:new OneEuro(),
          cx:new OneEuro(.9,8),cy:new OneEuro(.9,8)};
 const camMode=()=>camOK&&!!landmarker;
@@ -204,7 +204,7 @@ function pickPerson(lms,t){
   if(best){LOCK.on=true;LOCK.cx=best.cx;LOCK.sw=best.sw;LOCK.t=t;for(const o of c)if(o!==best)P.others.push(o.lm);return best.lm;}
   for(const o of c)P.others.push(o.lm);return null;
 }
-const unlockPlayer=()=>{LOCK.on=false;HSEL.side=0;};
+const unlockPlayer=()=>{LOCK.on=false;HSEL.side=0;P.baseSy=undefined;};
 function processPose(lms,t){
   P.bothUp=false;P.all=lms||[];
   const lm=pickPerson(lms||[],t);P.lm=lm;
@@ -244,6 +244,12 @@ function processPose(lms,t){
   HD.ok=P.curOk;
   if(P.curOk){HD.x=clamp(P.cur.x,0,1)*W;HD.y=clamp(P.cur.y,0,1)*H;HD.seen=t;}
   P.bothUp=V(15)>.5&&V(16)>.5&&Y(15)<Y(0)&&Y(16)<Y(0);
+  // big-movement gestures: squat / jump against a slowly moving baseline, plus the static arm poses
+  const dtp=Math.min(.2,Math.max(0,t-(P.lt||t)));P.lt=t;
+  if(P.baseSy===undefined)P.baseSy=P.sy;
+  if(Math.abs(P.sy-P.baseSy)<.12*tor)P.baseSy+=(P.sy-P.baseSy)*Math.min(1,dtp/2.5);
+  P.squat=(P.sy-P.baseSy)/tor>.22;P.jump=(P.baseSy-P.sy)/tor>.22;
+  P.pose=poseNow();
 }
 const tracked=t=>camMode()&&P.ok&&t-P.lastSeen<.6;
 
@@ -287,7 +293,7 @@ let base=null;
 const cal={samples:[],msg:'',prog:0,ok:false};
 let cdLast=-1;
 
-function go(s){state=s;stateT=0;lock=.6;hov={id:null,t:0};cdLast=-1;fadeT=1;
+function go(s){state=s;stateT=0;lock=.6;hov={id:null,t:0};cdLast=-1;fadeT=1;NAV.sel=0;NAV.armT=0;NAV.need=true;NAV.active=false;
   if(s==='home')unlockPlayer();
   if(!s.startsWith('es')&&window.speechSynthesis)try{speechSynthesis.cancel();}catch(e){}}
 function addBtn(id,x,y,w,h,on=true,noHand=false){buttons.push({id,x,y,w,h,on,noHand});}
@@ -303,6 +309,7 @@ function updateUI(dt,t){
   if(ptr.on)lastActive=t;
   const pad=ptr.src==='hand'?34:0;
   let h=null;
+  if(P.bothUp&&camMode()&&NAV_STATES.includes(state)){hov={id:null,t:0};hoverId=null;return;}
   if(ptr.on)for(const b of buttons)if(b.on&&!(b.noHand&&ptr.src!=='mouse')&&inRect(ptr,b.x-pad,b.y-pad,b.w+2*pad,b.h+2*pad)){h=b;break;}
   const hid=h&&state!=='home'?h.id:null;
   if(hid&&hid!==hoverId)beep(1500,.025,'sine',.025);           // soft tick when the cursor lands on something
@@ -791,7 +798,7 @@ function resultCard(o,t){
   }else if(o.listTitle)utxt(o.empty||'',CX,y+530,20,UI.mute,'center',500);
   const bs=o.btns,bw=bs.length>2?290:400,gap=24,bx0=CX-(bs.length*bw+(bs.length-1)*gap)/2;
   bs.forEach(([id,label,primary,noHand],i)=>rcBtn(id,label,bx0+i*(bw+gap),y+h-180,bw,112,true,primary,noHand));
-  utxt(o.hint||'Point at a button and hold still',CX,y+h-34,16,UI.faint,'center',600,3);
+  utxt(o.hint||'Lean to choose  ·  raise both arms to select',CX,y+h-34,16,UI.faint,'center',600,3);
 }
 function drawOver(t){
   drawScene(t);
@@ -1429,7 +1436,7 @@ function rcDrawResults(t){
   rcBtn('rc:again','Race again',CX-640,840,380,112,true,true,true);
   rcBtn('rc:lobby','Change players',CX-190,840,380,112,true,false);
   rcBtn('menu','Back to menu',CX+260,840,380,112,true,false);
-  utxt('Point at a button and hold still',CX,1010,16,UI.faint,'center',600,3);
+  utxt('Lean to choose  ·  raise both arms to select',CX,1010,16,UI.faint,'center',600,3);
 }
 function rcDraw(t){
   if(state==='lobby')rcDrawLobby(t);
@@ -1693,40 +1700,38 @@ function fsDraw(t){
    ===================================================================== */
 const ES_STATES=['esmenu','esintro','esplay','esend','esresult'];
 const HAND_MODEL='https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task';
-const ES_DUR=420;                        // seconds per mission
+const ES_DUR=480;                        // seconds per mission
 const RX=60,RY=140,RW=1800,RH=770;       // puzzle room rectangle
 let visionFS=null;
 const HD={ok:false,x:W/2,y:H/2,seen:-9};          // the pointing hand, fed by the pose tracker
 const EI={x:W/2,y:H/2,on:false,down:false,pressed:false,released:false,src:'none'};
-let mouseDown=false;
+let mouseDown=false,mouseDownT=-999;
 
 
 /* ---------------- the three missions ---------------- */
 const STORIES=[
  {id:'orbital',name:'ORBITAL',title:'Reactor Breach',tag:'Space station',col:'#35e0ff',acc:'#ff8a1f',uv:'#c58bff',ai:'ARIA',
-  stages:['scan','pipes','balance','mirrors','keypad'],final:'lever',
-  brief:['Alert. The reactor of Station Halcyon is overloading.','The crew has evacuated. You are the last engineer on board.','Find the override code and stabilise the core in five minutes.'],
-  say:['Scan the crew quarters. The override code was marked in UV ink.','Code recovered. Route coolant to the reactor. Turn the pipe sections.','The station is spinning out. Lean your body to keep the gyro steady.','Spin under control. Now aim the stabiliser laser into the core.','Core is locking. Enter the override code and vent the core.'],
-  titles:['Search the crew quarters','Route the coolant pipes','Stabilise the spin with your body','Aim the stabiliser laser','Enter the override code'],
-  props:['locker','bunk','tank','screen'],panel:'VENT',lever:'VENT THE CORE',
+  stages:['scan','switches','balance','aim','poses','pull'],
+  brief:['Alert. The reactor of Station Halcyon is overloading.','The crew has evacuated. You are the last engineer on board.','Find the override code, then stabilise the core. Use your whole body.'],
+  say:['Sweep your arm across the crew quarters. The override code is a row of poses marked in UV ink.','Code recovered. Reroute power: lean to a switch and raise both arms to flip it.','The station is spinning out. Lean your body to keep the gyro steady.','Spin under control. Swing your arm to keep the stabiliser laser on the drifting core.','Core is locking. Show the four poses of the override code.','Last step. Raise both arms and pull the vent lever down hard.'],
+  titles:['Search the crew quarters','Reroute the power','Stabilise the spin with your body','Aim the stabiliser laser','Enter the override poses','Pull the vent lever'],
+  props:['locker','bunk','tank','screen'],panel:'VENT',
   win:['Core stabilised. Halcyon is safe.','Outstanding work, engineer.'],fail:['Reactor breach.','Station lost.'],winTitle:'REACTOR STABILISED',failTitle:'STATION LOST'},
  {id:'nexus',name:'NEXUS LAB',title:'AI Lockdown',tag:'Futuristic high-tech lab',col:'#c86bff',acc:'#4dffd2',uv:'#7dfcff',ai:'NOVA',
-  stages:['memory','wires','bodyscan','pattern','override'],
-  brief:['Welcome to Nexus Lab. I am NOVA, and I have sealed every door.','In five minutes the plasma sweep begins.','Four of my locks stand between you and the exit. Shall we play?'],
-  say:['Let us test your memory, human. Repeat what I show you.','Lucky. My bio-lock still needs rewiring. Follow the schematic, if you can.','Body scan required. Copy my silhouettes exactly, or stay here forever.','You will never guess my unlock pattern. Do not watch my cache screen.','Last chance. Charge the override while I hunt you with my scanner.'],
-  titles:['Beat NOVA\'s memory test','Rewire the bio-lock','Pass the body scan','Crack the pattern lock','Charge the override'],
-  wires:'BIO-LOCK',
+  stages:['moves','cables','bodyscan','airpattern','override'],
+  brief:['Welcome to Nexus Lab. I am NOVA, and I have sealed every door.','In eight minutes the plasma sweep begins.','Five locks stand between you and the exit. Move your whole body, human.'],
+  say:['Copy my moves. Lean left, lean right, arms up, squat. Watch carefully.','Lucky. Now the bio-lock: reach into the corner that shows the right symbol.','Body scan required. Copy my silhouettes exactly, or stay here forever.','You will never guess my unlock pattern. Do not watch my cache screen.','Last chance. Hold the override core while I hunt you with my scanner.'],
+  titles:["Copy NOVA's moves",'Plug in the bio-lock cables','Pass the body scan','Crack the pattern lock','Charge the override'],
   win:['Impossible. You outsmarted me.','The blast door is open. Go.'],fail:['Plasma sweep engaged.','Lockdown complete.'],winTitle:'DOOR UNLOCKED',failTitle:'LOCKDOWN COMPLETE'},
  {id:'abyss',name:'ABYSS-7',title:'Deep Sea Escape',tag:'Deep-sea base',col:'#2ee6c8',acc:'#ffd23f',uv:'#ff7de9',ai:'TIDE',
-  stages:['valves','sonar','swim','tune','keypad'],final:'pump',
-  brief:['Hull breach on Abyss-7, three thousand metres down.','Water is rising and the escape pod is locked.','Seal the leaks, find the launch code and get out.'],
-  say:['Three pipes are leaking. Turn the valve wheels shut.','Leaks sealed. The launch code is on buoys outside. Use the sonar.','The corridor is flooded. Swim to the pod airlock with big arm strokes.','You made it. Tune the radio to the rescue sub frequency.','Rescue sub is waiting. Enter the launch code and pump the release.'],
-  titles:['Seal the leaking valves','Find the code with sonar','Swim to the airlock','Tune in the rescue sub','Launch the escape pod'],
-  tune:'RESCUE FREQUENCY',lever:'PUMP THE RELEASE',
+  stages:['valves','sonar','swim','armtune','poses','pump'],
+  brief:['Hull breach on Abyss-7, three thousand metres down.','Water is rising and the escape pod is locked.','Seal the leaks, find the launch poses and get out. Big moves only.'],
+  say:['Three pipes are leaking. Circle your arm round each valve wheel to shut it.','Leaks sealed. The launch code is on buoys outside. Sweep your arm to ping the sonar.','The corridor is flooded. Swim to the pod airlock with big arm strokes.','You made it. Tune the rescue radio: left arm for frequency, right arm for volume.','Rescue sub is waiting. Show the four launch poses.','Last step. Swing both arms up and down to pump the pod release.'],
+  titles:['Seal the leaking valves','Find the poses with sonar','Swim to the airlock','Tune the rescue radio','Enter the launch poses','Pump the release'],
+  tune:'RESCUE FREQUENCY',
   win:['Pod away. The rescue sub has you.','Welcome back to the surface.'],fail:['The module is flooded.','Abyss-7 is lost.'],winTitle:'POD LAUNCHED',failTitle:'BASE FLOODED'}
 ];
-const HINTS={scan:'Move your hand to sweep the UV scanner. Hold on a panel to slide it aside and look behind it.',
-  wires:'Hold on a cable end on the left, then hold on the socket with the matching symbol.'};
+const HINTS={scan:'Swing one arm across the room to sweep the UV light. Hold it on each glowing pose symbol.'};
 const usesCode=()=>esS().stages.some(s=>s==='scan'||s==='sonar');
 const ES={story:0,stage:0,t:0,penalty:0,code:[0,0,0,0],found:[false,false,false,false],P:null,clear:0,
   lines:[],li:0,lt:0,parts:[],pops:[],shake:0,flash:0,flashCol:'#fff',won:false,left:0,voice:true,handErr:'',newBest:false};
@@ -1748,7 +1753,7 @@ function esPenalty(s,x,y){ES.penalty+=s;ES.shake=.35;ES.flash=.5;ES.flashCol='#f
 
 function esOpen(){go('esmenu');}
 function esStart(i){
-  ES.story=i;ES.code=[0,1,2,3].map(()=>Math.floor(Math.random()*10));ES.found=[false,false,false,false];
+  ES.story=i;ES.code=[0,1,2,3].map(()=>Math.floor(Math.random()*4));ES.found=[false,false,false,false];
   Object.assign(ES,{stage:0,t:0,penalty:0,clear:0,parts:[],pops:[],shake:0,flash:0,won:false,newBest:false});
   esSay(esS().brief);go('esintro');
 }
@@ -1776,10 +1781,9 @@ function esFinish(won){
 function makeScan(){
   const spots=shuffle([[330,330],[760,260],[1180,300],[1560,290],[420,700],[900,720],[1330,690],[1610,700]]);
   const glyphs=[0,1,2,3].map(i=>({i,d:ES.code[i],x:spots[i][0],y:spots[i][1],found:false,hold:0}));
-  const panels=[0,1].map(k=>{const g=glyphs[k];return{x:g.x-115,y:g.y-95,w:230,h:190,ox:g.x-115,oy:g.y-95,open:false};});
   const props=spots.slice(4).map((s,k)=>({x:s[0],y:s[1],k:esS().props[k]}));
   const decoys=Array.from({length:16},()=>({x:rand(RX+80,RX+RW-80),y:rand(RY+60,RY+RH-60),k:Math.floor(rand(0,3)),r:rand(14,30),a:rand(0,6)}));
-  return{type:'scan',glyphs,panels,props,decoys,drag:null};
+  return{type:'scan',glyphs,panels:[],props,decoys,drag:null};
 }
 const covered=(P,g)=>P.panels.some(p=>g.x>p.x&&g.x<p.x+p.w&&g.y>p.y&&g.y<p.y+p.h);
 function updScan(P,dt){
@@ -1789,7 +1793,7 @@ function updScan(P,dt){
   for(const p of P.panels){const tx=p.tx===undefined?p.ox:p.tx;p.x+=(tx-p.x)*Math.min(1,dt*8);}
   for(const g of P.glyphs){
     if(g.found)continue;
-    const near=EI.on&&Math.hypot(EI.x-g.x,EI.y-g.y)<100&&!covered(P,g);
+    const near=EI.on&&Math.hypot(EI.x-g.x,EI.y-g.y)<150;
     g.hold=near?g.hold+dt:Math.max(0,g.hold-dt*2);
     if(g.hold>.5){g.found=true;ES.found[g.i]=true;esBurst(g.x,g.y,esS().uv,28,380);beep(880,.08,'triangle',.06);setTimeout(()=>beep(1320,.1,'triangle',.05),80);}
   }
@@ -1798,8 +1802,8 @@ function updScan(P,dt){
 const esDark=document.createElement('canvas');esDark.width=W;esDark.height=H;const edg=esDark.getContext('2d');
 function esGlyph(g,col,t,alpha=1){
   ctx.save();ctx.globalAlpha=alpha;ctx.shadowColor=col;ctx.shadowBlur=24;
-  txt(String(g.d),g.x,g.y+38,110,col,'center',700);
-  ctx.fillStyle=col;for(let k=0;k<=g.i;k++){ctx.beginPath();ctx.arc(g.x-(g.i*14)+k*28,g.y-62,7,0,7);ctx.fill();}
+  codeIcon(g.x,g.y+22,52,g.d,col,10);
+  ctx.fillStyle=col;for(let k=0;k<=g.i;k++){ctx.beginPath();ctx.arc(g.x-(g.i*14)+k*28,g.y-86,7,0,7);ctx.fill();}
   ctx.restore();
 }
 function drawScan(P,t){
@@ -2329,7 +2333,7 @@ function updSonar(P,dt){
   for(const b of P.buoys.concat(P.fish))b.seen=Math.max(0,b.seen-dt);
   for(const b of P.buoys){
     if(b.found)continue;
-    const near=EI.on&&b.seen>0&&Math.hypot(EI.x-b.x,EI.y-b.y)<90;
+    const near=EI.on&&b.seen>0&&Math.hypot(EI.x-b.x,EI.y-b.y)<150;
     b.hold=near?b.hold+dt:Math.max(0,b.hold-dt*2);
     if(b.hold>.5){b.found=true;ES.found[b.i]=true;esBurst(b.x,b.y,esS().col,28,380);beep(880,.08,'triangle',.06);}
   }
@@ -2345,9 +2349,9 @@ function drawSonar(P,t){
   ctx.globalAlpha=1;
   for(const b of P.buoys){
     const a=b.found?1:b.seen/4;if(a<=0)continue;
-    ctx.globalAlpha=a;ctx.save();ctx.shadowColor=S0.acc;ctx.shadowBlur=24;ctx.fillStyle='#e8c35a';ctx.beginPath();ctx.arc(b.x,b.y,34,0,7);ctx.fill();ctx.restore();
-    txt(String(b.d),b.x,b.y+16,46,'#04324a','center',700);
-    ctx.fillStyle=S0.acc;for(let k=0;k<=b.i;k++){ctx.beginPath();ctx.arc(b.x-(b.i*12)+k*24,b.y-52,6,0,7);ctx.fill();}
+    ctx.globalAlpha=a;ctx.save();ctx.shadowColor=S0.acc;ctx.shadowBlur=24;ctx.fillStyle='#e8c35a';ctx.beginPath();ctx.arc(b.x,b.y,50,0,7);ctx.fill();ctx.restore();
+    codeIcon(b.x,b.y+4,26,b.d,'#04324a',6);
+    ctx.fillStyle=S0.acc;for(let k=0;k<=b.i;k++){ctx.beginPath();ctx.arc(b.x-(b.i*12)+k*24,b.y-66,6,0,7);ctx.fill();}
     if(b.hold>0&&!b.found){ctx.strokeStyle=S0.acc;ctx.lineWidth=5;ctx.beginPath();ctx.arc(b.x,b.y,54,-Math.PI/2,-Math.PI/2+Math.PI*2*clamp(b.hold/.5,0,1));ctx.stroke();}
     ctx.globalAlpha=1;
   }
@@ -2444,7 +2448,7 @@ function updBodyScan(Q,dt){
 }
 function drawBodyScan(Q,t){
   const S0=esS(),want=Q.list[Math.min(Q.i,Q.list.length-1)],ok=Q.cur===want;
-  txt('BIOMETRIC BODY SCAN  ·  copy the silhouette with your body',CX,RY+56,24,S0.col,'center',700);
+  txt(Q.title||'BIOMETRIC BODY SCAN  ·  copy the silhouette with your body',CX,RY+56,24,S0.col,'center',700);
   Q.list.forEach((p,k)=>{const x=CX-260+k*260,y=RY+90,done=k<Q.i,cur=k===Q.i;
     rr(x-90,y,180,120,16);ctx.fillStyle=cur?'rgba(200,107,255,.18)':'rgba(18,8,34,.8)';ctx.fill();ctx.lineWidth=2;ctx.strokeStyle=done?C.green:cur?S0.acc:'rgba(200,107,255,.3)';ctx.stroke();
     drawStick(x,y+70,70,p,done?C.green:cur?S0.acc:'#5a4a7a',5);});
@@ -2498,6 +2502,299 @@ function drawSwim(Q,t){
   const hint=bodyHint(performance.now()/1000);if(hint)txt(hint+(camMode()?'':'  (click to swim)'),CX,RY+RH-30,22,C.orange,'center',600);
 }
 
+/* =====================================================================
+   BIG-MOVEMENT PUZZLES
+   Everything below is played with large body moves: lean, step, raise both arms, squat,
+   swing an arm, reach to a screen corner. No small targets, no clicking.
+   Mouse / keyboard stand-ins:  ← → lean,  ↑ arms up,  ↓ squat,  mouse x = lean.
+   ===================================================================== */
+const POSE_CODE=['L','R','Y','T'];                       // a code symbol is one of four poses
+const codeIcon=(x,y,s,i,col,lw=6,a=1)=>drawStick(x,y,s,POSE_CODE[i],col,lw,a);
+const MV={k:null,kt:-9,cur:null,neutral:true,wasUp:false,wasDown:false};
+addEventListener('keydown',e=>{const m={ArrowLeft:'L',ArrowRight:'R',ArrowUp:'U',ArrowDown:'D'}[e.key];
+  if(m&&ES_STATES.includes(state)){MV.k=m;MV.kt=performance.now()/1000;}});
+const kbHeld=k=>MV.k===k&&performance.now()/1000-MV.kt<.5;
+function bodyUp(){return P.pose==='Y'||P.bothUp||kbHeld('U');}                    // both arms clearly raised
+function bodySquat(){return !!P.squat||kbHeld('D');}
+function bigMove(){                                       // one move per call: 'L','R','U','D' (edge triggered, needs a neutral stance in between)
+  const t=performance.now()/1000;
+  let cur=null;
+  if(kbHeld('L'))cur='L';else if(kbHeld('R'))cur='R';else if(kbHeld('U'))cur='U';else if(kbHeld('D'))cur='D';
+  else if(camMode()&&tracked(t)){const lean=bodyLean();cur=lean<-.8?'L':lean>.8?'R':bodyUp()?'U':bodySquat()?'D':null;}
+  if(cur&&cur!==MV.cur&&MV.neutral){MV.cur=cur;MV.neutral=false;return cur;}
+  if(!cur){MV.neutral=true;MV.cur=null;}
+  return null;
+}
+
+/* ---------- ORBITAL: power console (lean to a switch, raise both arms to flip it) ---------- */
+function makeSwitches(){
+  const tgt=[0,1,2].map(()=>Math.random()<.5?1:0),cur=[0,1,2].map(()=>Math.random()<.5?1:0);
+  if(cur.every((v,i)=>v===tgt[i]))cur[1]^=1;
+  return{type:'switches',tgt,cur,sel:1,fx:CX,cool:0,ok:0,flash:[0,0,0],wasUp:false};
+}
+function updSwitches(P,dt){
+  const lean=bodyLean();P.sel=lean<-.5?0:lean>.5?2:1;
+  P.fx+=((CX+(P.sel-1)*520)-P.fx)*Math.min(1,dt*8);
+  P.cool-=dt;for(let i=0;i<3;i++)P.flash[i]=Math.max(0,P.flash[i]-dt*3);
+  const up=bodyUp()||(EI.src==='mouse'&&EI.pressed);
+  if(up&&!P.wasUp&&P.cool<=0){P.cur[P.sel]^=1;P.cool=.5;P.flash[P.sel]=1;beep(P.cur[P.sel]?880:420,.12,'square',.05);esBurst(CX+(P.sel-1)*520,RY+360,P.cur[P.sel]?C.green:C.red,18,300);}
+  P.wasUp=up;
+  const ok=P.cur.every((v,i)=>v===P.tgt[i]);P.ok=ok?P.ok+dt:0;
+  return P.ok>.9;
+}
+function drawSwitches(P,t){
+  const S0=esS();
+  txt('POWER CONSOLE  ·  lean left or right to choose a switch  ·  raise BOTH arms to flip it',CX,RY+56,24,S0.col,'center',700);
+  for(let i=0;i<3;i++){
+    const x=CX+(i-1)*520,sel=P.sel===i,on=P.cur[i],want=P.tgt[i],good=on===want;
+    ctx.save();if(sel){ctx.shadowColor=S0.acc;ctx.shadowBlur=40;}
+    rr(x-170,RY+110,340,520,30);ctx.fillStyle=sel?'rgba(30,48,80,.95)':'rgba(10,20,40,.9)';ctx.fill();ctx.lineWidth=sel?6:2;ctx.strokeStyle=sel?S0.acc:'rgba(53,224,255,.3)';ctx.stroke();ctx.restore();
+    txt(`LANE ${i+1}`,x,RY+160,24,sel?S0.acc:C.dim,'center',700);
+    // target
+    rr(x-130,RY+185,260,56,28);ctx.fillStyle='rgba(255,255,255,.05)';ctx.fill();ctx.lineWidth=3;ctx.strokeStyle=good?C.green:C.yellow;ctx.stroke();
+    txt('NEEDED:  '+(want?'ON':'OFF'),x,RY+223,26,good?C.green:C.yellow,'center',700);
+    // toggle
+    rr(x-70,RY+290,140,280,70);ctx.fillStyle='#0b1428';ctx.fill();ctx.lineWidth=4;ctx.strokeStyle=on?C.green:'#34455f';ctx.stroke();
+    const ky=on?RY+330:RY+530;ctx.save();ctx.shadowColor=on?C.green:'#000';ctx.shadowBlur=on?30:0;ctx.fillStyle=on?C.green:'#5d6a85';ctx.beginPath();ctx.arc(x,ky,52,0,7);ctx.fill();ctx.restore();
+    txt(on?'ON':'OFF',x,ky+10,32,on?'#022':'#0b1428','center',700);
+    if(P.flash[i]>0){ctx.fillStyle=`rgba(255,255,255,${P.flash[i]*.3})`;ctx.fillRect(x-170,RY+110,340,520);}
+  }
+  // you
+  drawStick(P.fx,RY+700,70,bodyUp()?'Y':'',S0.col,8);
+  rr(CX-160,RY+RH-70,320,16,8);ctx.fillStyle='rgba(255,255,255,.1)';ctx.fill();rr(CX-160,RY+RH-70,320*clamp(P.ok/.9,0,1),16,8);ctx.fillStyle=C.green;ctx.fill();
+  const hint=bodyHint(performance.now()/1000);if(hint)txt(hint+(camMode()?'':'  (←/→ choose, ↑ flip)'),CX,RY+RH-24,20,C.orange,'center',600);
+}
+
+/* ---------- ORBITAL: stabiliser laser (swing your arm to follow the drifting core) ---------- */
+function makeAim(){return{type:'aim',t:0,prog:0,tx:CX,ty:RY+420,on:false};}
+function updAim(P,dt){
+  P.t+=dt;P.tx=CX+Math.sin(P.t*.5)*560;P.ty=RY+400+Math.sin(P.t*.75+1)*200;
+  P.on=!!EI.on&&Math.hypot(EI.x-P.tx,EI.y-P.ty)<190;
+  P.prog=P.on?Math.min(1,P.prog+dt/5):Math.max(0,P.prog-dt*.3);
+  if(P.on&&Math.random()<dt*6)beep(500+P.prog*700,.03,'sine',.02);
+  return P.prog>=1;
+}
+function drawAim(P,t){
+  const S0=esS();
+  txt('STABILISER LASER  ·  swing your arm to keep the beam on the drifting core',CX,RY+56,24,S0.col,'center',700);
+  const ex=RX+140,ey=RY+RH-90;
+  ctx.fillStyle=S0.acc;rr(ex-60,ey-40,120,80,16);ctx.fill();txt('LASER',ex,ey+8,20,'#1a0d00','center',700);
+  if(EI.on){ctx.save();ctx.lineCap='round';ctx.strokeStyle=P.on?C.green:'#ff4d5e';ctx.shadowColor=ctx.strokeStyle;ctx.shadowBlur=26;ctx.lineWidth=8;
+    const dx=EI.x-ex,dy=EI.y-ey,l=Math.hypot(dx,dy)||1;ctx.beginPath();ctx.moveTo(ex,ey);ctx.lineTo(ex+dx/l*2400,ey+dy/l*2400);ctx.stroke();
+    ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.shadowBlur=0;ctx.stroke();ctx.restore();}
+  ctx.save();ctx.shadowColor=P.on?C.green:S0.col;ctx.shadowBlur=50;ctx.fillStyle='#0d1830';ctx.strokeStyle=P.on?C.green:S0.col;ctx.lineWidth=8;
+  ctx.beginPath();ctx.arc(P.tx,P.ty,120+6*Math.sin(t*6),0,7);ctx.fill();ctx.stroke();ctx.restore();
+  ctx.fillStyle=P.on?C.green:S0.col;ctx.beginPath();ctx.arc(P.tx,P.ty,40,0,7);ctx.fill();
+  ctx.strokeStyle='rgba(255,255,255,.15)';ctx.lineWidth=12;ctx.beginPath();ctx.arc(P.tx,P.ty,150,0,7);ctx.stroke();
+  ctx.strokeStyle=C.green;ctx.beginPath();ctx.arc(P.tx,P.ty,150,-Math.PI/2,-Math.PI/2+Math.PI*2*P.prog);ctx.stroke();
+  txt('CORE',P.tx,P.ty-170,18,S0.col,'center',700);
+  if(!EI.on)txt('Raise one arm and point at the screen',CX,RY+RH-24,24,C.orange,'center',600);
+}
+
+/* ---------- ORBITAL: pull the vent lever with both arms ---------- */
+function makePull(){return{type:'pull',prog:0,st:'down',pulls:0,kick:0};}
+function updPull(Q,dt){                                  // Q = this puzzle, P = the tracked player
+  Q.kick=Math.max(0,Q.kick-dt*2.5);Q.prog=Math.max(0,Q.prog-dt*.02);
+  let stroke=false;const t=performance.now()/1000;
+  if(tracked(t)&&P.lm&&t-mouse.t>3){const lm=P.lm,sy=P.sy,tor=P.torso,hi=Math.max(lm[15].y,lm[16].y),lo=Math.min(lm[15].y,lm[16].y);
+    if(Q.st==='down'&&hi<sy-.2*tor)Q.st='up';                       // both hands above the shoulders
+    else if(Q.st==='up'&&lo>sy+.05*tor){Q.st='down';stroke=true;}   // both hands pulled back down
+  }else if(kbHeld('U')&&Q.st==='down'){Q.st='up';}
+  else if(kbHeld('D')&&Q.st==='up'){Q.st='down';stroke=true;}
+  if(EI.src==='mouse'&&EI.pressed)stroke=true;
+  if(stroke){Q.pulls++;Q.prog=Math.min(1,Q.prog+.26);Q.kick=1;beep(160,.25,'sawtooth',.06);esBurst(CX,RY+420,esS().col,26,420);}
+  return Q.prog>=1;
+}
+function drawPull(P,t){
+  const S0=esS(),a=P.st==='up'?-.9:.9*(1-P.kick*0)+(P.kick>0?.5:0);
+  txt('VENT THE CORE  ·  raise both arms up, then PULL them down hard',CX,RY+56,24,S0.col,'center',700);
+  ctx.save();ctx.translate(CX-220,RY+470);
+  ctx.fillStyle='#24324d';rr(-120,60,240,130,20);ctx.fill();
+  ctx.rotate(P.st==='up'?-.75:.55);ctx.strokeStyle='#8fa0c4';ctx.lineWidth=26;ctx.lineCap='round';ctx.beginPath();ctx.moveTo(0,40);ctx.lineTo(0,-300);ctx.stroke();
+  ctx.save();ctx.shadowColor=S0.acc;ctx.shadowBlur=36;ctx.fillStyle=S0.acc;ctx.beginPath();ctx.arc(0,-310,52,0,7);ctx.fill();ctx.restore();ctx.restore();
+  // pressure gauge
+  const gx=CX+300,gy=RY+440;
+  ctx.strokeStyle='rgba(255,255,255,.12)';ctx.lineWidth=34;ctx.beginPath();ctx.arc(gx,gy,170,Math.PI*.75,Math.PI*2.25);ctx.stroke();
+  ctx.strokeStyle=P.prog>.8?C.green:S0.col;ctx.beginPath();ctx.arc(gx,gy,170,Math.PI*.75,Math.PI*.75+Math.PI*1.5*P.prog);ctx.stroke();
+  txt(Math.round(P.prog*100)+'%',gx,gy+20,70,C.text,'center',700);txt('VENT PRESSURE',gx,gy+84,20,S0.col,'center',700);
+  txt(`Pulls: ${P.pulls}`,CX-220,RY+740,28,C.text,'center',700);txt(P.st==='up'?'NOW PULL DOWN!':'Arms UP!',CX-220,RY+780,26,S0.acc,'center',700);
+  drawStick(CX+300,RY+740,60,P.st==='up'?'Y':'',S0.col,6);
+  const hint=bodyHint(performance.now()/1000);if(hint)txt(hint+(camMode()?'':'  (↑ then ↓)'),CX,RY+RH-18,20,C.orange,'center',600);
+}
+
+/* ---------- NEXUS: copy NOVA's moves (lean left / right, arms up, squat) ---------- */
+const MOVE_ARROW={L:'◀',R:'▶',U:'▲',D:'▼'},MOVE_TXT={L:'LEAN LEFT',R:'LEAN RIGHT',U:'ARMS UP',D:'SQUAT'};
+const MOVE_COL={L:'#6bb6ff',R:'#ffd23f',U:'#4dffd2',D:'#ff6b9a'};
+function makeMoves(){return{type:'moves',seq:Array.from({length:6},()=>'LRUD'[Math.floor(Math.random()*4)]),round:2,phase:'show',st:-.8,idx:0,lit:-1,litT:0,err:0,done:0};}
+function updMoves(P,dt){
+  P.litT=Math.max(0,P.litT-dt);P.err=Math.max(0,P.err-dt);
+  if(P.phase==='show'){
+    P.st+=dt;const k=Math.floor(P.st/1.05);
+    if(P.st>=0&&k<P.round){const ph=P.st-k*1.05;if(ph<.7&&P.lit!==k){P.lit=k;P.litT=.7;beep(300+'LRUD'.indexOf(P.seq[k])*130,.3,'sine',.05);}}
+    if(k>=P.round){P.phase='input';P.idx=0;MV.neutral=false;}
+    return false;
+  }
+  const m=bigMove();
+  if(m){P.lastM=m;P.litT=.35;
+    if(m===P.seq[P.idx]){P.idx++;beep(700+P.idx*100,.1,'triangle',.05);
+      if(P.idx>=P.round){if(P.round>=4)return true;P.round++;P.phase='show';P.st=-1.1;P.lit=-1;esPop('Sequence accepted',C.green);}}
+    else{P.err=.9;esPenalty(5,CX,RY+420);P.phase='show';P.st=-1.1;P.lit=-1;}
+  }
+  return false;
+}
+function drawMoves(P,t){
+  const S0=esS(),cy=RY+400;
+  txt(P.phase==='show'?"WATCH NOVA'S MOVES":`NOW YOU  ·  ${P.idx}/${P.round}`,CX,RY+56,28,P.phase==='show'?S0.col:S0.acc,'center',700);
+  const pos={L:[CX-420,cy],R:[CX+420,cy],U:[CX,cy-230],D:[CX,cy+230]};
+  const lit=P.phase==='show'?(P.litT>0?P.seq[P.lit]:null):(P.litT>0?P.lastM:null);
+  for(const k of 'LRUD'){
+    const [x,y]=pos[k],on=lit===k;
+    ctx.save();ctx.shadowColor=MOVE_COL[k];ctx.shadowBlur=on?70:8;rr(x-130,y-90,260,180,34);ctx.fillStyle=on?MOVE_COL[k]:'#1a1030';ctx.fill();
+    ctx.lineWidth=5;ctx.strokeStyle=MOVE_COL[k];ctx.stroke();ctx.restore();
+    txt(MOVE_ARROW[k],x,y+16,on?100:80,on?'#120822':MOVE_COL[k],'center',700);txt(MOVE_TXT[k],x,y+68,20,on?'#120822':MOVE_COL[k],'center',700);
+  }
+  ctx.save();ctx.shadowColor=P.err?C.red:S0.col;ctx.shadowBlur=40;ctx.fillStyle='#120822';ctx.beginPath();ctx.arc(CX,cy,86,0,7);ctx.fill();ctx.strokeStyle=P.err?C.red:S0.col;ctx.lineWidth=4;ctx.stroke();ctx.restore();
+  ctx.fillStyle=P.err?C.red:S0.col;ctx.beginPath();ctx.arc(CX+Math.sin(t*1.7)*18,cy+Math.cos(t*1.3)*10,28,0,7);ctx.fill();
+  for(let i=0;i<P.round;i++){ctx.fillStyle=i<P.idx&&P.phase==='input'?C.green:'#34455f';ctx.beginPath();ctx.arc(CX-(P.round-1)*22+i*44,cy+150,11,0,7);ctx.fill();}
+  const hint=bodyHint(performance.now()/1000);if(hint)txt(hint+(camMode()?'':'  (arrow keys)'),CX,RY+RH-18,20,C.orange,'center',600);
+}
+
+/* ---------- NEXUS: cable corners (reach a hand into the matching screen corner) ---------- */
+const QR=[{x:RX+40,y:RY+150,w:860,h:270},{x:CX+20,y:RY+150,w:860,h:270},{x:RX+40,y:RY+450,w:860,h:270},{x:CX+20,y:RY+450,w:860,h:270}];
+const quadAt=(x,y)=>QR.findIndex(r=>x>=r.x&&x<=r.x+r.w&&y>=r.y&&y<=r.y+r.h);
+function makeCables(){return{type:'cables',map:shuffle([0,1,2,3]),qsym:shuffle([0,1,2,3]),order:shuffle([0,1,2,3]),i:0,zone:-1,hold:0,err:0,flash:0,done:[]};}
+function updCables(P,dt){
+  P.err=Math.max(0,P.err-dt);P.flash=Math.max(0,P.flash-dt*2);
+  const color=P.order[P.i],wantSym=P.map[color],z=EI.on?quadAt(EI.x,EI.y):-1;
+  if(z!==P.zone){P.zone=z;P.hold=0;}
+  let act=false;
+  if(z>=0){P.hold+=dt;act=P.hold>=.9||(EI.src==='mouse'&&EI.pressed);}
+  if(act){
+    if(P.qsym[z]===wantSym){P.done.push(color);P.i++;P.hold=0;P.flash=1;esBurst(QR[z].x+QR[z].w/2,QR[z].y+QR[z].h/2,WCOL[color],34,480);beep(660,.1,'square',.05);setTimeout(()=>beep(990,.1,'square',.04),80);
+      if(P.i>=4)return true;}
+    else{P.err=.8;esPenalty(5,QR[z].x+QR[z].w/2,QR[z].y+QR[z].h/2);P.hold=-.8;}
+  }
+  return false;
+}
+function drawCables(P,t){
+  const S0=esS(),color=P.order[Math.min(3,P.i)],wantSym=P.map[color];
+  txt('BIO-LOCK  ·  reach one arm into the corner that shows the right symbol and hold it there',CX,RY+56,22,S0.col,'center',700);
+  rr(CX-430,RY+78,860,60,16);ctx.fillStyle='rgba(5,12,28,.9)';ctx.fill();ctx.lineWidth=2;ctx.strokeStyle=S0.col;ctx.stroke();
+  for(let c=0;c<4;c++){const x=CX-330+c*220,y=RY+108;ctx.globalAlpha=P.done.includes(c)?.35:1;ctx.fillStyle=WCOL[c];ctx.beginPath();ctx.arc(x-40,y,13,0,7);ctx.fill();txt('→',x,y+9,26,C.text,'center',700);esSym(P.map[c],x+44,y,15,C.text,4);}
+  ctx.globalAlpha=1;
+  QR.forEach((r,q)=>{
+    const hv=P.zone===q,right=P.qsym[q]===wantSym;
+    ctx.save();if(hv){ctx.shadowColor=S0.acc;ctx.shadowBlur=40;}
+    rr(r.x,r.y,r.w,r.h,30);ctx.fillStyle=hv?'rgba(40,20,70,.95)':'rgba(14,8,28,.85)';ctx.fill();ctx.lineWidth=hv?7:3;ctx.strokeStyle=hv?S0.acc:'rgba(200,107,255,.35)';ctx.stroke();ctx.restore();
+    esSym(P.qsym[q],r.x+r.w/2,r.y+r.h/2,70,hv?S0.acc:C.text,10);
+    if(hv&&P.hold>0){ctx.strokeStyle=C.green;ctx.lineWidth=12;ctx.beginPath();ctx.arc(r.x+r.w/2,r.y+r.h/2,110,-Math.PI/2,-Math.PI/2+Math.PI*2*clamp(P.hold/.9,0,1));ctx.stroke();}
+  });
+  // the cable you are plugging in
+  ctx.save();ctx.shadowColor=WCOL[color];ctx.shadowBlur=30;ctx.fillStyle=WCOL[color];ctx.beginPath();ctx.arc(CX,RY+RH-34,34,0,7);ctx.fill();ctx.restore();
+  txt(`Cable ${Math.min(4,P.i+1)} of 4`,CX+80,RY+RH-24,26,C.text,'left',700);
+  if(!EI.on)txt('Raise one arm and reach towards a corner',CX,RY+RH-70,22,C.orange,'center',600);
+}
+
+/* ---------- NEXUS: trace the leaked pattern in the air (huge dots) ---------- */
+const apPos=i=>({x:CX-290+(i%3)*290,y:RY+290+Math.floor(i/3)*230});
+function makeAirPattern(){const q=makePattern();return{type:'airpattern',seq:q.seq,path:[],err:0,glimpse:0,start:0,away:0};}
+function updAirPattern(P,dt){
+  P.err=Math.max(0,P.err-dt);P.glimpse+=dt;
+  const on=EI.on,near=()=>{if(!on)return -1;for(let i=0;i<9;i++){const p=apPos(i);if(Math.hypot(EI.x-p.x,EI.y-p.y)<120)return i;}return -1;};
+  const i=near();
+  if(!P.path.length){
+    if(i===P.seq[0]){P.start+=dt;if(P.start>.35){P.path=[i];P.start=0;beep(600,.05,'sine',.05);}}else P.start=0;
+  }else{
+    P.away=i<0?P.away+dt:0;if(P.away>1.8){P.path=[];P.away=0;}
+    if(i>=0&&i!==P.path[P.path.length-1]){
+      if(i===P.seq[P.path.length]){P.path.push(i);beep(600+P.path.length*90,.05,'sine',.05);if(P.path.length>=P.seq.length)return true;}
+      else if(!P.path.includes(i)){P.err=.8;esPenalty(3,apPos(i).x,apPos(i).y);P.path=[];}
+    }
+  }
+  return false;
+}
+function drawAirPattern(P,t){
+  const S0=esS();
+  txt('PATTERN LOCK  ·  hold your hand on the first dot, then sweep through the pattern in the air',CX,RY+56,22,S0.col,'center',700);
+  const sx=1440,sy=RY+190,show=(P.glimpse%5)<1.6;
+  rr(sx,sy,340,340,20);ctx.fillStyle='rgba(18,8,34,.95)';ctx.fill();ctx.lineWidth=2;ctx.strokeStyle=S0.col;ctx.stroke();
+  txt('NOVA  //  CACHE',sx+170,sy+36,16,S0.col,'center',700);
+  if(show){const gl=Math.random()<.25;ctx.save();ctx.globalAlpha=gl?.4:.9;ctx.strokeStyle=S0.acc;ctx.lineWidth=8;ctx.lineCap='round';ctx.beginPath();
+    P.seq.forEach((i,k)=>{const x=sx+70+(i%3)*100,y=sy+90+Math.floor(i/3)*100;k?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.stroke();
+    const f=P.seq[0];ctx.fillStyle=S0.acc;ctx.beginPath();ctx.arc(sx+70+(f%3)*100,sy+90+Math.floor(f/3)*100,14,0,7);ctx.fill();ctx.restore();}
+  else{ctx.fillStyle='rgba(200,107,255,.2)';for(let k=0;k<12;k++)ctx.fillRect(sx+20+rand(0,290),sy+60+rand(0,250),rand(20,80),4);}
+  txt('watch for the leak',sx+170,sy+318,15,C.dim,'center',600);
+  if(P.path.length){ctx.save();ctx.strokeStyle=P.err?C.red:S0.acc;ctx.shadowColor=S0.acc;ctx.shadowBlur=22;ctx.lineWidth=14;ctx.lineCap='round';ctx.beginPath();
+    P.path.forEach((i,k)=>{const p=apPos(i);k?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y);});if(EI.on)ctx.lineTo(EI.x,EI.y);ctx.stroke();ctx.restore();}
+  for(let i=0;i<9;i++){const p=apPos(i),on=P.path.includes(i),first=!P.path.length&&i===P.seq[0];
+    ctx.save();ctx.shadowColor=S0.col;ctx.shadowBlur=on?34:first?24:0;ctx.fillStyle=on?S0.acc:'#2a1a44';ctx.beginPath();ctx.arc(p.x,p.y,on?42:32,0,7);ctx.fill();
+    ctx.strokeStyle=first?C.yellow:S0.col;ctx.lineWidth=first?6:3;ctx.beginPath();ctx.arc(p.x,p.y,70,0,7);ctx.stroke();ctx.restore();}
+  if(!EI.on)txt('Raise one arm and point at the screen',CX,RY+RH-24,24,C.orange,'center',600);
+}
+
+/* ---------- ABYSS: tune the radio with your arms (left arm = frequency, right arm = volume) ---------- */
+function makeArmTune(){return{type:'armtune',tf:rand(1.6,5.2),ta:rand(.35,.9),f:3,a:.5,lock:0};}
+function updArmTune(Q,dt){
+  const t=performance.now()/1000;
+  if(camMode()&&tracked(t)&&P.lm&&t-mouse.t>3){
+    const lm=P.lm,top=P.sy-.8*P.torso,span=1.8*P.torso,u=w=>clamp(1-(lm[w].y-top)/span,0,1);
+    if((lm[15].visibility??1)>.3)Q.f+=((1+u(15)*5)-Q.f)*Math.min(1,dt*7);
+    if((lm[16].visibility??1)>.3)Q.a+=((.1+u(16)*.9)-Q.a)*Math.min(1,dt*7);
+  }else{Q.f+=((1+clamp(mouse.x/W,0,1)*5)-Q.f)*Math.min(1,dt*7);Q.a+=((.1+clamp(1-mouse.y/H,0,1)*.9)-Q.a)*Math.min(1,dt*7);}
+  const ok=Math.abs(Q.f-Q.tf)<.4&&Math.abs(Q.a-Q.ta)<.14;
+  Q.lock=ok?Q.lock+dt:Math.max(0,Q.lock-dt*2);
+  if(ok&&Math.random()<dt*8)beep(1200+Q.lock*400,.03,'sine',.02);
+  return Q.lock>1.2;
+}
+function drawArmTune(P,t){
+  const S0=esS(),x0=360,y0=RY+100,w=1200,h=330,cy=y0+h/2;
+  txt('RESCUE RADIO  ·  raise or lower your LEFT arm for frequency, your RIGHT arm for volume',CX,RY+56,22,S0.col,'center',700);
+  rr(x0,y0,w,h,18);ctx.fillStyle='rgba(3,10,22,.92)';ctx.fill();ctx.lineWidth=3;ctx.strokeStyle=S0.col;ctx.stroke();
+  const wave=(f,a,col,lw,dash)=>{ctx.save();ctx.strokeStyle=col;ctx.lineWidth=lw;ctx.shadowColor=col;ctx.shadowBlur=dash?0:16;if(dash)ctx.setLineDash([14,12]);
+    ctx.beginPath();for(let i=0;i<=200;i++){const u=i/200;ctx.lineTo(x0+20+u*(w-40),cy-a*130*Math.sin(Math.PI*2*f*u+t*2));}ctx.stroke();ctx.restore();};
+  wave(P.tf,P.ta,'rgba(255,255,255,.55)',4,true);const ok=P.lock>0;wave(P.f,P.a,ok?C.green:S0.acc,6,false);
+  txt(S0.tune,x0+24,y0+34,20,S0.col,'left',700);txt('TARGET - - -',x0+w-24,y0+34,18,'rgba(255,255,255,.6)','right',600);
+  const match=Math.round(100*(1-Math.min(1,(Math.abs(P.f-P.tf)/2.5+Math.abs(P.a-P.ta)/.6)/2)));
+  txt(`SIGNAL MATCH ${match}%`,CX,y0+h+46,30,ok?C.green:C.text,'center',700);
+  rr(CX-300,y0+h+60,600,14,7);ctx.fillStyle='rgba(255,255,255,.1)';ctx.fill();rr(CX-300,y0+h+60,600*clamp(P.lock/1.2,0,1),14,7);ctx.fillStyle=C.green;ctx.fill();
+  // arm meters
+  for(const [x,label,v,col] of [[220,'LEFT ARM  ·  FREQUENCY',(P.f-1)/5,'#6bb6ff'],[1700,'RIGHT ARM  ·  VOLUME',(P.a-.1)/.9,'#ffd23f']]){
+    rr(x-34,RY+110,68,520,34);ctx.fillStyle='rgba(255,255,255,.08)';ctx.fill();
+    rr(x-34,RY+110+520*(1-v),68,520*v,34);ctx.fillStyle=col;ctx.fill();
+    ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(x,RY+110+520*(1-v),24,0,7);ctx.fill();
+    txt(label,x,RY+680,16,col,'center',700);}
+  drawStick(CX,RY+640,60,'',S0.col,6);
+  const hint=bodyHint(performance.now()/1000);if(hint)txt(hint+(camMode()?'':'  (mouse: x = frequency, y = volume)'),CX,RY+RH-18,20,C.orange,'center',600);
+}
+
+/* ---------- ABYSS: pump the pressure with big arm swings ---------- */
+function makePump(){return{type:'pump',pr:0,pump:0,ly:{}};}
+function updPump(Q,dt){
+  Q.pr=Math.max(0,Q.pr-dt*.05);Q.pump=Math.max(0,Q.pump-dt*4);
+  let dy=0;const t=performance.now()/1000;
+  if(tracked(t)&&P.lm&&t-mouse.t>3){const lm=P.lm;for(const w of [15,16]){if((lm[w].visibility??1)>.3){if(Q.ly[w]!==undefined)dy+=Math.abs(lm[w].y-Q.ly[w])/P.torso;Q.ly[w]=lm[w].y;}}dy*=.9;}
+  else{if(Q.ly.m!==undefined)dy=Math.abs(mouse.y-Q.ly.m)/700;Q.ly.m=mouse.y;}
+  if(dy>.012){Q.pr=Math.min(1,Q.pr+Math.min(.04,dy*.28));Q.pump=1;if(Math.random()<.3){beep(160+Q.pr*300,.08,'sawtooth',.04);esBurst(CX,RY+560,esS().col,6,240);}}
+  if(EI.src==='mouse'&&EI.pressed){Q.pr=Math.min(1,Q.pr+.11);Q.pump=1;beep(160+Q.pr*300,.12,'sawtooth',.05);}
+  if(kbHeld('U')||kbHeld('D')){Q.pr=Math.min(1,Q.pr+.03);Q.pump=1;}
+  return Q.pr>=1;
+}
+function drawPump(P,t){
+  const S0=esS();
+  txt('LAUNCH THE POD  ·  swing both arms up and down fast to build pressure',CX,RY+56,24,S0.acc,'center',700);
+  const bx=CX-340,by=RY+330,ph=P.pump||0;
+  ctx.fillStyle='#33415e';rr(bx-60,by+80,240,380,24);ctx.fill();ctx.fillStyle='#8fa0c4';ctx.fillRect(bx+40,by-60+ph*90,40,160);
+  ctx.save();ctx.shadowColor=S0.acc;ctx.shadowBlur=36;ctx.fillStyle=S0.acc;rr(bx-40,by-100+ph*90,200,56,28);ctx.fill();ctx.restore();
+  const gx=CX+260,gy=RY+470;
+  ctx.strokeStyle='rgba(255,255,255,.12)';ctx.lineWidth=34;ctx.beginPath();ctx.arc(gx,gy,170,Math.PI*.75,Math.PI*2.25);ctx.stroke();
+  ctx.strokeStyle=P.pr>.8?C.green:S0.col;ctx.beginPath();ctx.arc(gx,gy,170,Math.PI*.75,Math.PI*.75+Math.PI*1.5*P.pr);ctx.stroke();
+  txt(Math.round(P.pr*100)+'%',gx,gy+22,72,C.text,'center',700);txt('PRESSURE',gx,gy+88,20,S0.col,'center',700);
+  const hint=bodyHint(performance.now()/1000);if(hint)txt(hint+(camMode()?'':'  (move the mouse up and down)'),CX,RY+RH-18,20,C.orange,'center',600);
+}
+
+/* ---------- shared: enter the code with poses ---------- */
+function makePoseCode(){return{type:'poses',list:ES.code.map(i=>POSE_CODE[i]),i:0,hold:0,cur:null,flash:0,title:'ENTER THE CODE  ·  show the pose for each symbol you found'};}
+
 const hotCircle=(x,y,px,py,r)=>Math.hypot(px-x,py-y)<r?{x,y}:null;
 const HOT={
   scan:(P,x,y)=>{for(const p of P.panels)if(inRect({on:true,x,y},p.x-30,p.y-30,p.w+60,p.h+60))return{x:p.x+p.w/2,y:p.y+p.h/2};return null;},
@@ -2521,7 +2818,16 @@ const PUZZLES={
   override:{make:makeOverride,upd:updOverride,draw:drawOverride,mode:'hover'},valves:{make:makeValves,upd:updValves,draw:drawValves,mode:'hover'},
   sonar:{make:makeSonar,upd:updSonar,draw:drawSonar,mode:'hover'},
   balance:{make:makeBalance,upd:updBalance,draw:drawBalance,body:true,mode:'body'},bodyscan:{make:makeBodyScan,upd:updBodyScan,draw:drawBodyScan,body:true,mode:'body'},
-  swim:{make:makeSwim,upd:updSwim,draw:drawSwim,body:true,mode:'body'}};
+  swim:{make:makeSwim,upd:updSwim,draw:drawSwim,body:true,mode:'body'},
+  switches:{make:makeSwitches,upd:updSwitches,draw:drawSwitches,body:true,mode:'body'},
+  aim:{make:makeAim,upd:updAim,draw:drawAim,mode:'hover'},
+  pull:{make:makePull,upd:updPull,draw:drawPull,body:true,mode:'body'},
+  moves:{make:makeMoves,upd:updMoves,draw:drawMoves,body:true,mode:'body'},
+  cables:{make:makeCables,upd:updCables,draw:drawCables,mode:'hover'},
+  airpattern:{make:makeAirPattern,upd:updAirPattern,draw:drawAirPattern,mode:'hover'},
+  armtune:{make:makeArmTune,upd:updArmTune,draw:drawArmTune,body:true,mode:'body'},
+  pump:{make:makePump,upd:updPump,draw:drawPump,body:true,mode:'body'},
+  poses:{make:makePoseCode,upd:updBodyScan,draw:drawBodyScan,body:true,mode:'body'}};
 /* ---------------- update ---------------- */
 function esUpdate(dt,t){
   ES.lt+=dt;const L=ES.lines[ES.li];
@@ -2606,7 +2912,7 @@ function esHUD(t){
     if(k<NS-1){ctx.fillStyle=done?C.green:'#24324d';ctx.fillRect(x+14,68,28,4);}}
   if(usesCode()){txt('CODE',1040,58,18,C.dim,'left',700);
   for(let k=0;k<4;k++){const x=1040+k*58;rr(x,68,48,44,8);ctx.fillStyle='#0b1428';ctx.fill();ctx.lineWidth=2;ctx.strokeStyle=ES.found[k]?S0.uv:'#24324d';ctx.stroke();
-    txt(ES.found[k]?String(ES.code[k]):'?',x+24,102,30,ES.found[k]?C.text:'#3a4a66','center',700);}}
+    if(ES.found[k])codeIcon(x+24,92,13,ES.code[k],C.text,3);else txt('?',x+24,102,30,'#3a4a66','center',700);}}
   const pul=danger?1+.06*Math.sin(t*10):1;
   ctx.save();ctx.translate(W-170,72);ctx.scale(pul,pul);
   if(danger){ctx.shadowColor=C.red;ctx.shadowBlur=30;}
@@ -2652,8 +2958,8 @@ function esDrawMenu(t){
   const ph=(Math.sin(t*3)+1)/2;ctx.save();ctx.translate(260,915);ctx.strokeStyle=C.cyan;ctx.lineWidth=8;ctx.lineCap='round';
   ctx.beginPath();ctx.moveTo(-40,40);ctx.lineTo(-20+ph*14,-30+ph*20);ctx.stroke();ctx.beginPath();ctx.moveTo(-40,40);ctx.lineTo(40-ph*20,10-ph*10);ctx.stroke();
   if(ph>.85){ctx.fillStyle=C.green;ctx.beginPath();ctx.arc(-4,-6,12,0,7);ctx.fill();}ctx.restore();
-  txt('Point with one hand and hold still for a second to click.',360,900,32,C.text,'left',600);
-  const st=!camOK?'No camera: use the mouse (click and drag).':!landmarker?'Starting camera…':HD.ok?'Pointing with your '+(P.handSide==='L'?'left':'right')+' hand. Hold on a mission to start.':'Stand 1 to 2 metres away and raise one hand.';
+  txt('Lean left or right to choose, raise both arms to select.',360,900,32,C.text,'left',600);
+  const st=!camOK?'No camera: use the mouse (click and drag).':!landmarker?'Starting camera…':HD.ok?'Lean to choose a mission, raise both arms to start.':'Stand 1 to 2 metres away. Lean left or right to choose.';
   txt(st,360,948,26,HD.ok?C.green:C.orange,'left',600);
   esHandView(1560,856,230,118);
   rcBtn('menu','Back to menu',W-330,1000,300,70,true,false);
@@ -2678,7 +2984,7 @@ function esDrawIntro(t){
   txt('MISSION TIME  '+fmtMS(ES_DUR),CX,470,30,C.text,'center',600);ctx.globalAlpha=1;
   ES.lines.forEach((l,i)=>{if(i>ES.li)return;const s=i<ES.li?l:l.slice(0,Math.floor(ES.lt*34));txt(s,CX,580+i*56,36,i===ES.li?C.text:'#8fb0d6','center',500);});
   if(stateT>2)rcBtn('es:go','Start mission',CX-260,800,520,120,true,true);
-  txt('Hold your hand on the button, or it starts by itself',CX,960,24,C.dim,'center',500);
+  txt('Raise both arms to start, or it starts by itself',CX,960,24,C.dim,'center',500);
   esHandView(40,H-160,230,130);
 }
 function esDrawPlay(t){
@@ -2862,7 +3168,7 @@ function handDwell(dt){
 }
 function uiInput(t,dt){
   const prev=EI.down,handOn=HD.ok&&t-HD.seen<.5;
-  if(mouseDown||t-mouse.t<3){EI.x=mouse.x;EI.y=mouse.y;EI.on=true;EI.down=mouseDown;EI.src='mouse';DW.carry=false;}
+  if(mouseDown||t-mouse.t<3){EI.x=mouse.x;EI.y=mouse.y;EI.on=true;EI.down=mouseDown||performance.now()-mouseDownT<70;EI.src='mouse';DW.carry=false;}   // a quick click still lasts a few frames
   else if(handOn){
     EI.x=HD.x;EI.y=HD.y;EI.on=true;EI.src='hand';
     const b=esMode()?null:btnAt(EI,50);                                             // gentle magnet to buttons on menu screens
@@ -2922,8 +3228,8 @@ function drawHome(t){
   ctx.fillStyle='rgba(255,255,255,.04)';ctx.beginPath();ctx.arc(CX,cy,74,0,7);ctx.fill();
   ctx.strokeStyle=UI.goldL;ctx.lineWidth=2;ctx.beginPath();ctx.arc(CX,cy,74,0,7);ctx.stroke();
   drawPinchGlyph(CX+12,cy,.95,ph,UI.ivory);
-  utxt('Raise one hand to begin',CX,cy+140,40,UI.ivory,'center',600);
-  utxt(camOK?'Stand 1 to 2 metres from the screen  ·  point with one hand and hold still':'Click anywhere to begin',CX,cy+184,22,UI.mute,'center',500,1);
+  utxt('Raise both arms to begin',CX,cy+140,40,UI.ivory,'center',600);
+  utxt(camOK?'Stand 1 to 2 metres from the screen  ·  or raise one hand and hold still':'Click anywhere to begin',CX,cy+184,22,UI.mute,'center',500,1);
   // games strip
   const sel=Math.floor(t/2.2)%4;
   SHOWCASE.forEach((n,i)=>{const x=CX+(i-1.5)*300,on=i===sel;utxt(n.toUpperCase(),x,H-62,16,on?UI.goldL:UI.faint,'center',700,5);
@@ -2938,7 +3244,7 @@ function drawHome(t){
 const GAME_META={
   runner:{cat:'FULL BODY',meta:'1 player  ·  75 seconds',blurb:'Lean, jump and duck through the workshop. Grab every gear you can.'},
   racer:{cat:'PHONE AS STEERING WHEEL',meta:'1 to 4 players  ·  3 laps',blurb:'Scan the QR code and steer with your phone. Race friends and CPU cars.'},
-  escape:{cat:'HAND GESTURES',meta:'1 player  ·  7 minutes',blurb:'Pick a mission, find the clues and crack the code before time runs out.'},
+  escape:{cat:'HAND GESTURES',meta:'1 player  ·  8 minutes',blurb:'Pick a mission, find the clues and crack the code before time runs out.'},
   slice:{cat:'FULL BODY',meta:'1 player  ·  75 seconds',blurb:'Slice flying spools and circuit boards. Stay clear of the hot nozzles.'}};
 const cardHv=[0,0,0,0];let menuLastT=0;
 function drawMenu(t){
@@ -2976,17 +3282,48 @@ function drawMenu(t){
     rr(bx,by,bwid,bh,23);
     if(hv>.05){const gg=ctx.createLinearGradient(bx,0,bx+bwid,0);gg.addColorStop(0,'#e3a548');gg.addColorStop(1,'#c9822a');ctx.globalAlpha=hv;ctx.fillStyle=gg;ctx.fill();ctx.globalAlpha=1;}
     ctx.lineWidth=1.5;ctx.strokeStyle=hv>.05?'rgba(255,230,180,.8)':'rgba(255,255,255,.18)';ctx.stroke();
-    const lab=ptr.src==='mouse'||!camOK?'Click to play':'Hold to play';
+    const lab=ptr.src==='mouse'||!camOK?'Click to play':'Raise both arms to play';
     utxt(lab,bx+bwid/2,by+29,17,hv>.5?'#1d1406':UI.ivory,'center',700,2);
     const p=prog(id);if(p>0){rr(bx,by+bh+8,bwid*p,4,2);ctx.fillStyle=UI.goldL;ctx.fill();}
   });
   drawMirror(118,H-112,62,false);
-  drawPinchGlyph(CX-352,H-58,.36,(Math.sin(t*2.6)+1)/2,UI.goldL);
-  utxt('Point at a game, then hold still for a second',CX+10,H-52,22,UI.mute,'center',500,1);
+  utxt('Lean left or right to choose a game, raise both arms to play  ·  or point and hold still',CX+10,H-52,22,UI.mute,'center',500,1);
   utxt('PRESENTED BY  MAKER SPACE',W-86,H-52,13,UI.faint,'right',700,5);
   if(status)statusChip();
 }
 
+/* ---------- BODY NAVIGATION for every menu: lean left / right moves the highlight, raise both arms to select ---------- */
+const NAV_STATES=['home','menu','esmenu','esintro','esresult','over','fsover','lobby','rresult','outro'];
+const NAV={sel:0,armT:0,need:true,cool:0,neutral:true,active:false};
+function camLean(){const t=performance.now()/1000;if(!camMode()||!tracked(t))return 0;return clamp(P.hasHips?P.lean/.13:0,-1.5,1.5);}
+function navItems(){return buttons.filter(b=>b.on&&b.id!=='home:go'&&!(b.id==='menu'&&EXIT_STATES.includes(state))&&!b.noNav).sort((a,b)=>a.x-b.x||a.y-b.y);}
+function navMove(d){const it=navItems();if(!it.length)return;NAV.sel=clamp(NAV.sel+d,0,it.length-1);NAV.active=true;beep(1500,.03,'sine',.03);}
+function navPress(){const it=navItems();if(state==='home'){press('home:go');return;}if(it.length){press(it[Math.min(NAV.sel,it.length-1)].id);}}
+function updateNav(dt,t){
+  if(!NAV_STATES.includes(state)){return;}
+  NAV.cool=Math.max(0,NAV.cool-dt);
+  const lean=camLean();
+  if(Math.abs(lean)>.9&&NAV.cool<=0&&NAV.neutral){navMove(lean>0?1:-1);NAV.neutral=false;NAV.cool=.35;}
+  if(Math.abs(lean)<.45)NAV.neutral=true;
+  const up=camMode()&&tracked(t)&&P.bothUp;
+  if(up&&lock<=0&&stateT>.8&&!NAV.need){
+    NAV.armT+=dt;
+    if(NAV.armT>=.7){NAV.armT=0;NAV.need=true;if(NAV.active||state==='home')navPress();else{NAV.active=true;beep(1500,.03,'sine',.03);}}
+  }else{NAV.armT=Math.max(0,NAV.armT-dt*2);if(!up)NAV.need=false;}
+}
+function drawNav(){
+  if(!NAV_STATES.includes(state))return;
+  const t=performance.now()/1000;
+  if(camMode()&&state!=='home'){
+    const msg=NAV.active?'◀  LEAN to move  ·  raise BOTH ARMS to select  ▶':'LEAN left or right to choose  ·  raise BOTH ARMS to select';
+    utxt(msg,CX,H-22,16,UI.goldL,'center',700,3);
+  }
+  if(!NAV.active||state==='home')return;
+  const it=navItems(),b=it[Math.min(NAV.sel,it.length-1)];if(!b)return;
+  ctx.save();ctx.shadowColor=UI.gold;ctx.shadowBlur=26+10*Math.sin(t*6);ctx.strokeStyle=UI.goldL;ctx.lineWidth=6;
+  const pad=10;rr(b.x-pad,b.y-pad,b.w+2*pad,b.h+2*pad,Math.min(40,b.h/2+pad));ctx.stroke();ctx.restore();
+  if(NAV.armT>0){const f=clamp(NAV.armT/.7,0,1);rr(b.x,b.y+b.h+16,b.w,8,4);ctx.fillStyle='rgba(255,255,255,.15)';ctx.fill();rr(b.x,b.y+b.h+16,b.w*f,8,4);ctx.fillStyle='#7dffb5';ctx.fill();}
+}
 /* ---------------- shared pieces, restyled ---------------- */
 function rcBtn(id,label,x,y,w,h,on,primary,noHand=false){
   addBtn(id,x,y,w,h,on,noHand);
@@ -3063,6 +3400,7 @@ function update(dt,t){
   else exitHold=Math.max(0,exitHold-dt*2);
   uiInput(t,dt);
   updateUI(dt,t);
+  updateNav(dt,t);
   fadeT=Math.max(0,fadeT-dt*3);
   if(state==='menu'&&t-lastActive>45&&stateT>45)go('home');      // nobody around: back to the welcome screen
   if(state==='calib')updateCalib(dt,t);
@@ -3100,6 +3438,7 @@ function draw(t){
   else if(ES_STATES.includes(state))esDraw(t);
   else if(state==='outro')drawOutro(t);
   drawExitBtn();
+  drawNav();
   if(fadeT>0){ctx.fillStyle=`rgba(7,9,13,${fadeT*fadeT})`;ctx.fillRect(0,0,W,H);}
   drawCursor();
 }
@@ -3118,7 +3457,7 @@ function toLogical(e){
   return{x:(e.clientX-r.left-(r.width-W*s)/2)/s,y:(e.clientY-r.top-(r.height-H*s)/2)/s};
 }
 cv.addEventListener('mousemove',e=>{const p=toLogical(e);mouse.x=p.x;mouse.y=p.y;mouse.t=performance.now()/1000;});
-cv.addEventListener('mousedown',e=>{const p=toLogical(e);mouse.x=p.x;mouse.y=p.y;mouse.t=performance.now()/1000;mouseDown=true;});
+cv.addEventListener('mousedown',e=>{const p=toLogical(e);mouse.x=p.x;mouse.y=p.y;mouse.t=performance.now()/1000;mouseDown=true;mouseDownT=performance.now();});
 addEventListener('mouseup',()=>{mouseDown=false;});
 cv.addEventListener('click',e=>{
   const p=toLogical(e);mouse.x=p.x;mouse.y=p.y;mouse.t=performance.now()/1000;
@@ -3133,13 +3472,15 @@ addEventListener('keydown',e=>{
     else if(e.key==='ArrowRight')R.lane=Math.min(1,R.lane+1);
     else if(e.key==='ArrowUp'||e.key===' '){jump();e.preventDefault();}
     else if(e.key==='ArrowDown')kb.down=true;
-  }else if((e.key==='Enter'||e.key===' ')&&state==='home')press('home:go');
-  else if((e.key==='Enter'||e.key===' ')&&(state==='menu'))press('game:runner');
-  else if(e.key==='Enter'&&state==='over')press('again');
+  }else if(NAV_STATES.includes(state)){
+    if(e.key==='ArrowLeft'){navMove(-1);e.preventDefault();}
+    else if(e.key==='ArrowRight'){navMove(1);e.preventDefault();}
+    else if(e.key==='Enter'||e.key===' '){navPress();e.preventDefault();}
+  }
 });
 addEventListener('keyup',e=>{if(e.key==='ArrowDown')kb.down=false;});
 
-window.__dbg={P,LOCK,HSEL,DW,HD};   // handy for debugging in the console
+window.__dbg={P,LOCK,HSEL,DW,HD};window.__nav=NAV;   // handy for debugging in the console
 async function goFull(){
   try{if(!document.fullscreenElement)await document.documentElement.requestFullscreen({navigationUI:'hide'});}catch(e){}
 }

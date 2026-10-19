@@ -2,11 +2,10 @@
 
 Open `index.html` on the TV (serve it over https, e.g. GitHub Pages). Staff press **Start the experience** once; after that visitors run everything themselves.
 
-## Controls for visitors (made for 1 to 2 metres from the screen)
-- **Point and hold still.** Raise one hand and point at the screen; hold it still on a button for about a second to select it (a ring fills). No finger detail is needed, so it works at normal standing distance.
-- **One player is locked in.** The camera may see several people, but it locks onto the person standing closest to the middle (and close enough, about 3 m or less) and keeps following that same person, so people walking past or watching are ignored. They show dimmed in the camera preview. If the player leaves for about 2.5 s the lock is released; the welcome screen always starts fresh.
-- **One hand points, and it stays the same hand.** The raised hand is used; the other must be clearly higher for 0.7 s to take over, so left and right do not flicker. The preview shows which hand is active.
-- In Escape Protocol puzzles: *tap* = hold on a target; *grab* = hold on a handle, move it, hold still again to let go; some puzzles need no click at all (circle a wheel, sweep a sonar, move your hand up and down to pump).
+## Controls for visitors (big body movements, 1 to 2 metres from the screen)
+- **Menus: lean and raise both arms.** Lean left or right to move the gold highlight, raise **both arms** above your head for about 0.7 s to select. The first arms-up just wakes the highlight. Keyboard arrows + Enter and the mouse also work; pointing a hand and holding still still works as a backup.
+- **One player is locked in.** The camera may see several people, but it locks onto the person standing closest to the middle (about 3 m or less) and keeps following them, so people walking past or watching are ignored. They show dimmed in the preview. If the player leaves for about 2.5 s the lock is released.
+- **Escape Protocol uses the whole body**: lean, squat, jump, arms up / out / one arm, swing arms, step into big floor zones. Poses are shown as stick-figure symbols, not finger gestures.
 - The pose model is the accurate "full" one and switches to the fast "lite" model by itself on slow computers (see `CFG.model`).
 - A welcome screen invites people in; after 45 s with nobody around the menu returns to it. The mouse always works.
 
@@ -23,7 +22,7 @@ Open `index.html` on the TV (serve it over https, e.g. GitHub Pages). Staff pres
   To use your own relay add `?signal=host:port` (or `host:port:s` for https) to the TV URL.
 - Phone settings (gear icon): auto-gas, invert steering, touch wheel fallback, re-centre.
 
-## Filament Slice (hand tracking)
+## Filament Slice (arm swipes)
 One player at a time: the camera follows whoever stands in the middle of its view and ignores friends watching at the sides. Swipe both hands (or the mouse) fast through flying filament spools (+10) and circuit boards (+15). Keep a combo going for up to x5.
 Avoid the red-hot nozzles: each one you slice costs a power cell (3 lives). A shift lasts 75 s.
 
@@ -33,14 +32,9 @@ Files: `index.html` (TV: menu, Maker Run, Circuit Racers), `controller.html` (ph
 - The TV page goes full screen when you press **Start the station** (press **F** to toggle).
 - In Chrome or Edge, use **Install as an app** on the start screen (or the install icon in the address bar) to get a desktop icon that opens full screen with no browser bars. Needs https.
 
-## Escape Protocol (point, hold and move)
-A 2D escape room controlled with one pointing hand and your body (see the controls above).
-Pick one of three missions: **Orbital** (stop a space-station reactor), **Nexus Lab** (escape a rogue AI's lockdown) or **Abyss-7** (get out of a flooding deep-sea base).
-Each mission has its own five puzzles in seven minutes, mixing a pointing hand with full-body moves (seven minutes):
-- **Orbital**: UV scanner search for the code, rotate pipe tiles to route coolant, **lean your body** to keep the spinning station in the green, flip mirrors to aim a laser into the core, then keypad + lever.
-- **Nexus Lab**: repeat NOVA's light sequence, rewire the bio-lock, **copy NOVA's body-scan poses** (arms up, arms out, one arm up), draw the leaked unlock pattern, then hold the override charge while dodging NOVA's scanner beam.
-- **Abyss-7**: turn three valve wheels shut, ping the sonar to find the code buoys, **swim with big arm strokes** to the airlock, tune the rescue frequency, then keypad + pump the release.
-Wrong moves cost time. Stand about 1 to 1.5 m from the camera so it can see your fingers. The narrator speaks; press **V** to mute. No camera? Use the mouse (click and drag).
+## Escape Protocol (big movements)
+A 2D escape room played with your whole body (arms, lean, squat, jump). Pick one of three missions: **Orbital** (stop a space-station reactor), **Nexus Lab** (escape a rogue AI's lockdown) or **Abyss-7** (get out of a flooding deep-sea base). Each mission is 8 minutes with its own puzzles and a four-pose code made of stick-figure symbols (arm left / arm right / both arms up / T-pose).
+Puzzles mix big-zone switches, aiming, pulling, move sequences (lean, squat, jump), corner cables, arm-drawn patterns, arm tuning, pumping and pose copying. Wrong moves cost time. The narrator speaks; press **V** to mute. No camera? Use the mouse or arrow keys.
 
 ## After every game
 A short "Welcome to SPACElogic, presented by MAKER SPACE" screen with the MAKER SPACE logo (drawn in code, no image file) plays before the results.
