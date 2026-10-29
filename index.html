@@ -3104,7 +3104,7 @@ function drawOutro(t){
   gearOutline(260,820,330,48,t*.15,'rgba(200,205,212,.12)',4);gearOutline(1700,220,260,40,-t*.19,'rgba(200,205,212,.12)',4);
   gearOutline(1560,900,150,22,t*.33,'rgba(207,140,42,.22)',4);gearOutline(380,200,110,16,-t*.45,'rgba(207,140,42,.22)',4);
   ctx.fillStyle='rgba(255,255,255,.03)';for(let y=0;y<H;y+=24)for(let x=(y/24%2)*12;x<W;x+=24){ctx.beginPath();ctx.arc(x,y,4,0,7);ctx.fill();}
-  const a1=clamp(stateT/.8,0,1),a2=clamp((stateT-1.2)/.8,0,1);
+  const a1=clamp(stateT/.4,0,1),a2=clamp((stateT-.5)/.4,0,1);
   ctx.globalAlpha=a1;
   txt('W E L C O M E   T O',CX,190,40,'#c8ccd2','center',600);
   const lw=brandW(120);ctx.save();ctx.translate(0,(1-a1)*30);brand(CX-lw/2,330,120);ctx.restore();
@@ -3113,7 +3113,6 @@ function drawOutro(t){
   drawMakerLogo(CX,690+(1-a2)*30,1.15);
   ctx.globalAlpha=1;
   txt('Thanks for playing!',CX,H-30,26,'#7d838c','center',500);
-  if(stateT>1.5)rcBtn('outro:next','Continue',W-360,H-140,300,100,true,false);
 }
 
 /* =====================================================================
@@ -3412,7 +3411,7 @@ function update(dt,t){
   if(RC_STATES.includes(state))rcUpdate(dt,t);
   else if(FS_STATES.includes(state))updateSlice(dt,t);
   else if(ES_STATES.includes(state))esUpdate(dt,t);
-  else if(state==='outro'&&stateT>10)go(outroNext);
+  else if(state==='outro'&&stateT>2.6)go(outroNext);
   if(!RC_STATES.includes(state)&&NET.peer)netTick(dt);   // keep phones informed outside the race screens
 }
 function draw(t){
