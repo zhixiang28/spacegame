@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>SPACElogic Maker Space Arcade</title>
+<title>SPACElogic Makerspace Arcade</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon-192.png">
@@ -61,7 +61,7 @@ import {FilesetResolver, PoseLandmarker} from "https://cdn.jsdelivr.net/npm/@med
    CONFIG: tweak these on site
    ===================================================================== */
 const CFG = {
-  brand1:'SPACE', brand2:'logic', sub:'MAKER SPACE ARCADE',
+  brand1:'SPACE', brand2:'logic', sub:'MAKERSPACE ARCADE',
   model:'full',            // 'full' = more accurate at 1-3 m (falls back to 'lite' by itself on slow machines)
   minShW:0.09,             // ignore people whose shoulders are narrower than this share of the frame (too far away)
   dwell:1.0,               // seconds to hold the hand cursor on a button
@@ -564,7 +564,7 @@ function drawRoom(t){
   ctx.shadowColor=C.cyan;ctx.shadowBlur=26;ctx.lineWidth=5;ctx.strokeStyle=C.cyan;ctx.stroke();ctx.restore();
   const bw=brandW(108);
   ctx.save();ctx.shadowColor=BRAND.a;ctx.shadowBlur=22;brand(CX-bw/2,172,108);ctx.restore();
-  txt('MAKER SPACE',CX,226,34,C.orange,'center',600);
+  txt('MAKERSPACE',CX,226,34,C.orange,'center',600);
   // shelf with spools
   ctx.fillStyle='#202f4f';ctx.fillRect(1400,120,440,10);ctx.fillRect(1400,240,440,10);ctx.fillRect(1400,350,440,10);
   const cols=[C.orange,C.cyan,'#d9362f','#4dff9a','#ffd23f'];
@@ -3042,9 +3042,9 @@ function esDraw(t){
 }
 
 /* =====================================================================
-   OUTRO after every game: "Welcome to SPACElogic, presented by MAKER SPACE"
+   OUTRO after every game: "Welcome to SPACElogic, presented by MAKERSPACE"
    ===================================================================== */
-/* MAKER SPACE logo, redrawn as vector art (gears + bold lettering) */
+/* MAKERSPACE logo, redrawn as vector art (gears + bold lettering) */
 function toothGear(cx,cy,r,teeth,rot,fill,hole){
   ctx.save();ctx.translate(cx,cy);ctx.rotate(rot);ctx.fillStyle=fill;ctx.beginPath();
   const n=teeth*4;
@@ -3250,7 +3250,7 @@ function drawMenu(t){
   const dt=Math.min(.05,t-menuLastT);menuLastT=t;
   bgSpace(t);
   brand(86,128,60);
-  utxt('MAKER SPACE ARCADE',W-86,100,17,UI.goldL,'right',700,8);
+  utxt('MAKERSPACE ARCADE',W-86,100,17,UI.goldL,'right',700,8);
   const handOn=HD.ok&&t-HD.seen<.5;
   utxt(handOn?'Hand detected  ·  point at a game and hold still':camOK?'Raise one hand and point at a game':'Click a game to play',W-86,132,18,handOn?UI.ivory:UI.mute,'right',500,1);
   utxt('Choose your experience',CX,258,56,UI.ivory,'center',300,1);
@@ -3287,7 +3287,7 @@ function drawMenu(t){
   });
   drawMirror(118,H-112,62,false);
   utxt('Lean left or right to choose a game, raise both arms to play  ·  or point and hold still',CX+10,H-52,22,UI.mute,'center',500,1);
-  utxt('PRESENTED BY  MAKER SPACE',W-86,H-52,13,UI.faint,'right',700,5);
+  utxt('PRESENTED BY  MAKERSPACE',W-86,H-52,13,UI.faint,'right',700,5);
   if(status)statusChip();
 }
 

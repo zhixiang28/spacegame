@@ -1,4 +1,4 @@
-# SPACElogic Maker Space Arcade
+# SPACElogic Makerspace Arcade
 
 Open `index.html` on the TV (serve it over https, e.g. GitHub Pages). Staff press **Start the experience** once; after that visitors run everything themselves.
 
@@ -37,7 +37,7 @@ A 2D escape room played with your whole body (arms, lean, squat, jump). Pick one
 Puzzles mix big-zone switches, aiming, pulling, move sequences (lean, squat, jump), corner cables, arm-drawn patterns, arm tuning, pumping and pose copying. Wrong moves cost time. The narrator speaks; press **V** to mute. No camera? Use the mouse or arrow keys.
 
 ## After every game
-A short "Welcome to SPACElogic, presented by MAKER SPACE" screen with the MAKER SPACE logo (drawn in code, no image file) plays for about 2.5 seconds and then closes by itself, before the results.
+A short "Welcome to SPACElogic, presented by MAKERSPACE" screen with the MAKERSPACE logo (drawn in code, no image file) plays for about 2.5 seconds and then closes by itself, before the results.
 
 ## Wi-Fi QR in the racers lobby
 Press **W** in the Circuit Racers lobby to enter the Wi-Fi name and password. A second QR code then appears so phones can join your network first.
