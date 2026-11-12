@@ -6,7 +6,7 @@ Open `index.html` on the TV (serve it over https, e.g. GitHub Pages). Staff pres
 - **Menus: lean and raise both arms.** Lean left or right to move the gold highlight, raise **both arms** above your head for about 0.7 s to select. The first arms-up just wakes the highlight. Keyboard arrows + Enter and the mouse also work; pointing a hand and holding still still works as a backup.
 - **One player is locked in.** The camera may see several people, but it locks onto the person standing closest to the middle (about 3 m or less) and keeps following them, so people walking past or watching are ignored. They show dimmed in the preview. If the player leaves for about 2.5 s the lock is released.
 - **Escape Protocol uses the whole body**: lean, squat, jump, arms up / out / one arm, swing arms, step into big floor zones. Poses are shown as stick-figure symbols, not finger gestures.
-- The pose model is the accurate "full" one and switches to the fast "lite" model by itself on slow computers (see `CFG.model`).
+- **Tracking.** Every joint is smoothed (steady when you stand still, no lag when you move fast), short camera dropouts are bridged, and gestures use hysteresis so they do not flicker. The pose model starts on "full", moves up to "heavy" on fast computers and down to "lite" on slow ones by itself (see `CFG.model`).
 - A welcome screen invites people in; after 45 s with nobody around the menu returns to it. The mouse always works.
 
 ## Circuit Racers (phones as steering wheels)
@@ -27,6 +27,11 @@ One player at a time: the camera follows whoever stands in the middle of its vie
 Avoid the red-hot nozzles: each one you slice costs a power cell (3 lives). A shift lasts 75 s.
 
 Files: `index.html` (TV: menu, Maker Run, Circuit Racers), `controller.html` (phone).
+
+## Graphics, sound and performance
+- A shared effects engine adds bloom, particles, screen shake, hit-stop, film grain and cross-zoom transitions between screens.
+- It watches the frame rate and turns effects down by itself on a slow computer. Add `?q=0`, `?q=1` or `?q=2` to the TV URL to force low, medium or full quality.
+- All sound is synthesised in the browser (no audio files). A quiet soundtrack follows the action; press **N** to mute the music.
 
 ## Full screen and install
 - The TV page goes full screen when you press **Start the station** (press **F** to toggle).
